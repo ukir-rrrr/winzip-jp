@@ -1,6 +1,6 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = zipcore::crate_is_linked();
+    let _ = zipcore::EFS_UTF8_BIT;
 
     tauri::Builder::default()
         .run(tauri::generate_context!())
