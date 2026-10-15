@@ -8,7 +8,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::error::ZipcoreError;
-use crate::fsutil::{atomic_replace, path_eq};
+use crate::fsutil::{path_eq, replace_keeping_backup};
 use crate::pkzip::SIG_EOCD;
 
 /// ピース数の上限。`.z01` … `.z998` + 最後の `.zip`。
@@ -481,19 +481,30 @@ impl SplitWriter {
             });
         }
         let finals = final_volume_paths(&self.dest, count);
-        let mut placed = Vec::new();
+        let mut placed: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
         for (partial, final_path) in partials.iter().zip(finals.iter()) {
-            match replace_file(partial, final_path) {
-                Ok(()) => placed.push(final_path.clone()),
+            match replace_keeping_backup(partial, final_path) {
+                Ok(backup) => placed.push((final_path.clone(), backup)),
                 Err(e) => {
                     discard_paths(&partials);
-                    for p in &placed {
-                        if !path_eq(p, &self.dest) {
-                            let _ = fs::remove_file(p);
+                    for (p, backup) in placed.into_iter().rev() {
+                        if let Some(bak) = backup {
+                            if fs::rename(&bak, &p).is_err() {
+                                if fs::copy(&bak, &p).is_ok() {
+                                    let _ = fs::remove_file(&bak);
+                                }
+                            }
+                        } else {
+                            let _ = fs::remove_file(&p);
                         }
                     }
                     return Err(e.into());
                 }
+            }
+        }
+        for (_, backup) in &placed {
+            if let Some(bak) = backup {
+                let _ = fs::remove_file(bak);
             }
         }
         Ok(finals)
@@ -507,16 +518,6 @@ pub fn map_split_io(err: io::Error) -> ZipcoreError {
         }
     } else {
         err.into()
-    }
-}
-
-fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
-    match atomic_replace(from, to)? {
-        Some(backup) => {
-            let _ = fs::remove_file(&backup);
-            Ok(())
-        }
-        None => Ok(()),
     }
 }
 

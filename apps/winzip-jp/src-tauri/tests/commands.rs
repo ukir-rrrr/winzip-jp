@@ -37,6 +37,16 @@ fn unique_dir(label: &str) -> PathBuf {
     path
 }
 
+fn incompressible(n: usize) -> Vec<u8> {
+    let mut x = 0x9e3779b97f4a7c15u64;
+    (0..n)
+        .map(|_| {
+            x = x.wrapping_mul(0xbf58476d1ce4e5b9).wrapping_add(1);
+            (x >> 56) as u8
+        })
+        .collect()
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect()
 }
@@ -588,20 +598,19 @@ fn create_rejects_empty_password() {
 fn create_split_writes_z01_and_zip_with_cp932_names() {
     let root = unique_dir("split");
     let src = root.join("が.txt");
-    let payload: Vec<u8> = (0..4000u32)
-        .map(|i| (i.wrapping_mul(37) + 9) as u8)
-        .collect();
-    fs::write(&src, &payload).unwrap();
+    // 周期 256 の列は deflate で 512 未満に潰れる。分割ピースが要る入力にする。
+    fs::write(&src, incompressible(8000)).unwrap();
     let dest = root.join("out.zip");
     let mut sandbox = Sandbox::new();
     sandbox.grant(&src);
     sandbox.grant_save_dest(&dest);
+    let split_bytes = 512u64;
     create_archive_direct(
         &sandbox,
         CreateDto {
             paths: vec![src.to_string_lossy().into_owned()],
             replacements: Default::default(),
-            split_bytes: Some(512),
+            split_bytes: Some(split_bytes),
             ..Default::default()
         },
         dest.to_str().unwrap(),
@@ -612,7 +621,7 @@ fn create_split_writes_z01_and_zip_with_cp932_names() {
     let z01 = dest.with_file_name("out.z01");
     assert!(z01.exists(), "z01 piece");
     assert!(dest.exists(), "last zip piece");
-    assert!(fs::metadata(&z01).unwrap().len() <= 512);
+    assert!(fs::metadata(&z01).unwrap().len() <= split_bytes);
     let headers = inspect_zip_headers(&dest).unwrap();
     let file = headers
         .iter()
