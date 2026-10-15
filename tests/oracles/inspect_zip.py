@@ -212,8 +212,7 @@ def linearize_chunks(chunks: list[bytes]) -> bytes:
     return bytes(data)
 
 
-def read_zip_bytes(path: Path) -> bytes:
-    """WinZip 分割 (stem.z01 … stem.zip) なら連結し、必要ならオフセットを直す。"""
+def _join_on_disk(path: Path) -> bytes:
     first = path.with_name(path.stem + ".z01")
     if not first.is_file():
         return path.read_bytes()
@@ -228,6 +227,27 @@ def read_zip_bytes(path: Path) -> bytes:
         if i > 999:
             break
     chunks.append(path.read_bytes())
+    return linearize_chunks(chunks)
+
+
+def read_zip_bytes(path: Path) -> bytes:
+    """WinZip 分割 (stem.z01 … stem.zip) なら連結し、必要ならオフセットを直す。
+
+    最後の .zip の EOCD ThisDisk を正とする。単体 ZIP の隣の古い .zNN は無視する。
+    """
+    data = path.read_bytes()
+    try:
+        eocd = find_eocd(data)
+    except ValueError:
+        return _join_on_disk(path)
+    this_disk = _u16(data, eocd + 4)
+    if this_disk == 0:
+        return data
+    chunks: list[bytes] = []
+    for i in range(1, this_disk + 1):
+        piece = path.with_name(path.stem + f".z{i:02d}")
+        chunks.append(piece.read_bytes())
+    chunks.append(data)
     return linearize_chunks(chunks)
 
 

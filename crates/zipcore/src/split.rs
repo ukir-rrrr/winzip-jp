@@ -800,6 +800,25 @@ mod tests {
     }
 
     #[test]
+    fn ensure_record_fits_pads_when_header_is_larger_than_piece() {
+        let tmp = TempDir::new();
+        let dest = tmp.path().join("out.zip");
+        let mut w = SplitWriter::create(dest, 16).unwrap();
+        w.write_all(&[1u8; 10]).unwrap();
+        w.ensure_record_fits(20).unwrap();
+        assert_eq!(w.volume_index(), 1);
+        assert_eq!(w.offset_in_volume().unwrap(), 0);
+        w.write_all(&[9u8; 20]).unwrap();
+        let pieces = w.finish().unwrap();
+        assert_eq!(fs::metadata(&pieces[0]).unwrap().len(), 16);
+        let first = fs::read(&pieces[0]).unwrap();
+        assert_eq!(&first[..10], &[1u8; 10]);
+        assert_eq!(&first[10..], &[0u8; 6]);
+        assert_eq!(&fs::read(&pieces[1]).unwrap()[..], &[9u8; 16]);
+        assert_eq!(fs::read(&pieces[2]).unwrap(), vec![9u8; 4]);
+    }
+
+    #[test]
     fn unbounded_volume_index_stays_on_last_piece() {
         let tmp = TempDir::new();
         let dest = tmp.path().join("out.zip");

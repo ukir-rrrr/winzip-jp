@@ -304,6 +304,9 @@ pub fn publish_tmp_set(tmp_vols: &[PathBuf], dest_vols: &[PathBuf]) -> Result<()
     for (_, bak) in backups {
         let _ = fs::remove_file(bak);
     }
+    if let Some(dest) = dest_vols.last() {
+        let _ = split::discard_stale_volumes(dest, dest_vols.len() as u32);
+    }
     Ok(())
 }
 
@@ -845,6 +848,34 @@ mod tests {
         assert_eq!(fs::read(&dest_z01).unwrap(), b"OLDZ01");
         assert_eq!(fs::read(&dest_zip).unwrap(), b"OLDZIP");
         assert!(dest_z02.is_dir());
+        let _ = fs::remove_dir_all(&dest_root);
+    }
+
+    #[test]
+    fn publish_tmp_set_drops_stale_z_pieces() {
+        let dest_root = std::env::temp_dir().join(format!(
+            "wzjp-pubstale-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dest_root).unwrap();
+        let dest_zip = dest_root.join("out.zip");
+        let dest_z01 = dest_root.join("out.z01");
+        let dest_z02 = dest_root.join("out.z02");
+        fs::write(&dest_z01, b"OLD1").unwrap();
+        fs::write(&dest_z02, b"OLD2").unwrap();
+        fs::write(&dest_zip, b"OLDZIP").unwrap();
+        let tmp_zip = container_tmp_zip();
+        let tmp_z01 = split::volume_path(&tmp_zip, 1, false);
+        fs::write(&tmp_z01, b"new1").unwrap();
+        fs::write(&tmp_zip, b"newzip").unwrap();
+        publish_tmp_set(&[tmp_z01, tmp_zip], &[dest_z01.clone(), dest_zip.clone()]).unwrap();
+        assert_eq!(fs::read(&dest_z01).unwrap(), b"new1");
+        assert_eq!(fs::read(&dest_zip).unwrap(), b"newzip");
+        assert!(!dest_z02.exists());
         let _ = fs::remove_dir_all(&dest_root);
     }
 }
