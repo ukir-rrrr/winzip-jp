@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+node_modules/
+dist/
+dist-ssr/
+*.local
+*.log
+.DS_Store
+
+apps/winzip-jp/e2e/artifacts/*.png
+apps/winzip-jp/src-tauri/gen/

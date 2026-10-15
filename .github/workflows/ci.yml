@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  zipcore:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2022, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test zipcore
+        run: cargo test -p zipcore --all-features
+
+  ui-e2e:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            apps/winzip-jp/src-tauri -> apps/winzip-jp/src-tauri/target
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build frontend
+        run: pnpm --filter winzip-jp build
+      - name: Capture S1 screenshot
+        run: pnpm --filter winzip-jp e2e
+      - name: Build Tauri debug app
+        run: pnpm --filter winzip-jp build:debug
+      - name: Capture debug app window
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p apps/winzip-jp/e2e/artifacts
+          APP=$(find target apps/winzip-jp/src-tauri/target -name '*.app' -type d 2>/dev/null | head -1 || true)
+          if [[ -z "${APP}" ]]; then
+            APP=$(find . -name '*.app' -type d | head -1 || true)
+          fi
+          if [[ -z "${APP}" ]]; then
+            echo "debug .app が見つかりません"
+            exit 0
+          fi
+          echo "launching ${APP}"
+          open "${APP}"
+          sleep 6
+          screencapture -x apps/winzip-jp/e2e/artifacts/s1-tauri-window.png || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: apps/winzip-jp/e2e/artifacts/
+          if-no-files-found: error

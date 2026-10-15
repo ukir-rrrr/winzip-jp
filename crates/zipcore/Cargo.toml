@@ -1,0 +1,9 @@
+[package]
+name = "zipcore"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "CP932 向け ZIP のエンコーディング・作成・解凍・分割（実装は PR 1 以降）"
+
+[dependencies]
