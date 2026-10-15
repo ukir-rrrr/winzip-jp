@@ -1,17 +1,20 @@
 //! ZIP 一覧と解凍。読み取りは `zip` crate、名前は raw バイトを `decode_name` する。
 
+use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
 use zip::ZipArchive;
 
 use crate::encoding::{decode_name, detect_encoding, Detection, NameEncoding};
 use crate::error::ZipcoreError;
-use crate::write::{Progress, ProgressPhase, SecretString};
+use crate::fsutil::{absolute, atomic_replace, path_eq, stays_under};
+use crate::job::{check_cancel, Progress, ProgressPhase, SecretString};
 
 const COPY_BUF: usize = 64 * 1024;
 const MAX_ENTRIES: usize = 65_535;
@@ -62,19 +65,13 @@ pub struct ExtractReport {
     pub bytes_written: u64,
 }
 
-struct CatalogEntry {
+struct Indexed {
     index: usize,
-    name_raw: Vec<u8>,
-    display_name: String,
-    is_dir: bool,
-    uncompressed_size: u64,
-    compressed_size: u64,
-    crc: u32,
-    gpbf: u16,
+    listed: ListedEntry,
 }
 
 struct Catalog {
-    entries: Vec<CatalogEntry>,
+    entries: Vec<Indexed>,
     detection: Detection,
     encoding: NameEncoding,
 }
@@ -83,19 +80,7 @@ pub fn list_zip(req: ListRequest) -> Result<ListReport, ZipcoreError> {
     let mut archive = open_archive(&req.archive)?;
     let catalog = catalog_archive(&mut archive, req.encoding)?;
     Ok(ListReport {
-        entries: catalog
-            .entries
-            .into_iter()
-            .map(|e| ListedEntry {
-                name_raw: e.name_raw,
-                display_name: e.display_name,
-                is_dir: e.is_dir,
-                uncompressed_size: e.uncompressed_size,
-                compressed_size: e.compressed_size,
-                crc: e.crc,
-                gpbf: e.gpbf,
-            })
-            .collect(),
+        entries: catalog.entries.into_iter().map(|e| e.listed).collect(),
         detection: catalog.detection,
         encoding: catalog.encoding,
     })
@@ -132,8 +117,8 @@ pub fn extract_zip(
     let bytes_total: u64 = catalog
         .entries
         .iter()
-        .filter(|e| !e.is_dir)
-        .map(|e| e.uncompressed_size)
+        .filter(|e| !e.listed.is_dir)
+        .map(|e| e.listed.uncompressed_size)
         .fold(0, u64::saturating_add);
     let entries_total = catalog.entries.len() as u32;
 
@@ -141,8 +126,8 @@ pub fn extract_zip(
     if !req.overwrite {
         let existing: Vec<String> = planned
             .iter()
-            .filter(|p| !p.entry.is_dir && p.dest.exists())
-            .map(|p| p.entry.display_name.clone())
+            .filter(|p| !p.entry.listed.is_dir && p.dest.exists())
+            .map(|p| p.entry.listed.display_name.clone())
             .collect();
         if !existing.is_empty() {
             return Err(ZipcoreError::OverwriteRequired { paths: existing });
@@ -201,13 +186,13 @@ fn extract_planned(
         check_cancel(cancel)?;
         progress(Progress {
             phase: ProgressPhase::Writing,
-            current_entry: Some(item.entry.display_name.clone()),
+            current_entry: Some(item.entry.listed.display_name.clone()),
             entries_done,
             entries_total,
             bytes_done,
             bytes_total,
         });
-        if item.entry.is_dir {
+        if item.entry.listed.is_dir {
             session.ensure_dir(&item.dest)?;
         } else {
             if let Some(parent) = item.dest.parent() {
@@ -220,7 +205,7 @@ fn extract_planned(
                 progress,
                 Progress {
                     phase: ProgressPhase::Writing,
-                    current_entry: Some(item.entry.display_name.clone()),
+                    current_entry: Some(item.entry.listed.display_name.clone()),
                     entries_done,
                     entries_total,
                     bytes_done,
@@ -262,15 +247,18 @@ fn extract_one_file(
     let tmp = unique_tmp(&session.dest_canon);
     session.temps.push(tmp.clone());
 
-    let mut src = archive.by_index(item.entry.index)?;
+    let name = &item.entry.listed.display_name;
+    let mut src = archive
+        .by_index(item.entry.index)
+        .map_err(|e| zip_err(e, name))?;
     if src.encrypted() {
         return Err(ZipcoreError::Encrypted {
-            entry: item.entry.display_name.clone(),
+            entry: name.clone(),
         });
     }
     if src.is_symlink() {
         return Err(ZipcoreError::PathTraversal {
-            entry: item.entry.display_name.clone(),
+            entry: name.clone(),
         });
     }
 
@@ -285,10 +273,9 @@ fn extract_one_file(
             break;
         }
         written = written.saturating_add(n as u64);
-        if written > item.entry.uncompressed_size || written > MAX_ENTRY_UNCOMPRESSED {
+        if written > item.entry.listed.uncompressed_size || written > MAX_ENTRY_UNCOMPRESSED {
             return Err(ZipcoreError::Corrupt(format!(
-                "{} の展開サイズがヘッダを超えています",
-                item.entry.display_name
+                "{name} の展開サイズがヘッダを超えています"
             )));
         }
         hasher.update(&buf[..n]);
@@ -298,22 +285,20 @@ fn extract_one_file(
         progress(p);
     }
     drop(src);
-    if written != item.entry.uncompressed_size {
+    if written != item.entry.listed.uncompressed_size {
         return Err(ZipcoreError::Corrupt(format!(
-            "{} の展開サイズがヘッダと一致しません",
-            item.entry.display_name
+            "{name} の展開サイズがヘッダと一致しません"
         )));
     }
-    if hasher.finalize() != item.entry.crc {
+    if hasher.finalize() != item.entry.listed.crc {
         return Err(ZipcoreError::Corrupt(format!(
-            "{} の CRC が一致しません",
-            item.entry.display_name
+            "{name} の CRC が一致しません"
         )));
     }
     out.sync_all()?;
     drop(out);
 
-    let backup = place_extracted(&tmp, &item.dest)?;
+    let backup = atomic_replace(&tmp, &item.dest)?;
     session.temps.pop();
     if let Some(backup) = backup {
         session.backups.push((item.dest.clone(), backup));
@@ -322,7 +307,7 @@ fn extract_one_file(
     if !stays_under(&placed, &session.dest_canon) {
         let _ = fs::remove_file(&item.dest);
         return Err(ZipcoreError::PathTraversal {
-            entry: item.entry.display_name.clone(),
+            entry: name.clone(),
         });
     }
     if !existed {
@@ -408,7 +393,7 @@ fn catalog_archive(
     let detection = detect_encoding(&detect_rows);
     let encoding = encoding_override.unwrap_or(detection.encoding);
     let mut entries = Vec::with_capacity(raw_entries.len());
-    let mut seen_dest = std::collections::HashSet::new();
+    let mut dests = DestSet::default();
     for raw in raw_entries {
         let display_name = decode_name(&raw.name_raw, encoding);
         if let Some(reason) = unsafe_entry_reason(&raw.name_raw, &display_name) {
@@ -421,21 +406,18 @@ fn catalog_archive(
                 entry: display_name,
             });
         }
-        let key = display_name.replace('\\', "/");
-        if !seen_dest.insert(key) {
-            return Err(ZipcoreError::Corrupt(format!(
-                "同じ展開先に複数のエントリがあります: {display_name}"
-            )));
-        }
-        entries.push(CatalogEntry {
+        dests.insert(&display_name, raw.is_dir)?;
+        entries.push(Indexed {
             index: raw.index,
-            name_raw: raw.name_raw,
-            display_name,
-            is_dir: raw.is_dir,
-            uncompressed_size: raw.uncompressed_size,
-            compressed_size: raw.compressed_size,
-            crc: raw.crc,
-            gpbf: raw.gpbf,
+            listed: ListedEntry {
+                name_raw: raw.name_raw,
+                display_name,
+                is_dir: raw.is_dir,
+                uncompressed_size: raw.uncompressed_size,
+                compressed_size: raw.compressed_size,
+                crc: raw.crc,
+                gpbf: raw.gpbf,
+            },
         });
     }
 
@@ -457,21 +439,115 @@ struct RawMeta {
     gpbf: u16,
 }
 
+#[derive(Default)]
+struct DestSet {
+    files: HashSet<String>,
+    dirs: HashSet<String>,
+    has_children: HashSet<String>,
+}
+
+impl DestSet {
+    fn insert(&mut self, display_name: &str, is_dir: bool) -> Result<(), ZipcoreError> {
+        let key = dest_key(display_name)?;
+        if is_dir {
+            if self.files.contains(&key) {
+                return Err(dest_conflict(display_name));
+            }
+            if !self.dirs.insert(key.clone()) {
+                return Err(dest_conflict(display_name));
+            }
+        } else if self.files.contains(&key)
+            || self.dirs.contains(&key)
+            || self.has_children.contains(&key)
+        {
+            return Err(dest_conflict(display_name));
+        } else {
+            self.files.insert(key.clone());
+        }
+        let mut prefix = key.as_str();
+        while let Some(i) = prefix.rfind('/') {
+            prefix = &prefix[..i];
+            if self.files.contains(prefix) {
+                return Err(dest_conflict(display_name));
+            }
+            self.has_children.insert(prefix.to_string());
+        }
+        Ok(())
+    }
+}
+
+fn dest_key(display_name: &str) -> Result<String, ZipcoreError> {
+    let unified = display_name.replace('\\', "/");
+    let trimmed = unified.trim_matches('/');
+    if trimmed.is_empty() || trimmed == "." || trimmed.split('/').all(|c| c.is_empty() || c == ".")
+    {
+        return Err(ZipcoreError::PathTraversal {
+            entry: display_name.to_string(),
+        });
+    }
+    let nfc: String = trimmed.nfc().collect();
+    Ok(fold_dest_key(nfc))
+}
+
+fn fold_dest_key(key: String) -> String {
+    if cfg!(any(windows, target_os = "macos")) {
+        key.to_lowercase()
+    } else {
+        key
+    }
+}
+
+fn dest_conflict(display_name: &str) -> ZipcoreError {
+    ZipcoreError::Corrupt(format!(
+        "同じ展開先に複数のエントリがあります: {display_name}"
+    ))
+}
+
+fn zip_err(err: zip::result::ZipError, entry: &str) -> ZipcoreError {
+    match ZipcoreError::from(err) {
+        ZipcoreError::Encrypted { entry: name } if name.is_empty() => ZipcoreError::Encrypted {
+            entry: entry.to_string(),
+        },
+        ZipcoreError::UnsupportedEntry {
+            entry: name,
+            reason,
+        } if name.is_empty() => ZipcoreError::UnsupportedEntry {
+            entry: entry.to_string(),
+            reason,
+        },
+        other => other,
+    }
+}
+
 struct PlannedOutput<'a> {
-    entry: &'a CatalogEntry,
+    entry: &'a Indexed,
     dest: PathBuf,
 }
 
 fn plan_outputs<'a>(
-    entries: &'a [CatalogEntry],
+    entries: &'a [Indexed],
     dest_canon: &Path,
     archive_canon: &Path,
 ) -> Result<Vec<PlannedOutput<'a>>, ZipcoreError> {
     let mut out = Vec::with_capacity(entries.len());
     for entry in entries {
-        let dest = join_under_dest(dest_canon, &entry.display_name, entry.is_dir)?;
+        let dest = join_under_dest(dest_canon, &entry.listed.display_name, entry.listed.is_dir)?;
+        if path_eq(&dest, dest_canon) {
+            return Err(ZipcoreError::PathTraversal {
+                entry: entry.listed.display_name.clone(),
+            });
+        }
         if path_eq(&dest, archive_canon) || stays_under(archive_canon, &dest) {
             return Err(ZipcoreError::DestOverlapsInput { dest: dest.clone() });
+        }
+        if dest.exists() {
+            let dest_is_dir = dest.is_dir();
+            if dest_is_dir != entry.listed.is_dir {
+                return Err(ZipcoreError::Corrupt(format!(
+                    "ファイルとフォルダが衝突しています: {}",
+                    entry.listed.display_name
+                )));
+            }
         }
         out.push(PlannedOutput { entry, dest });
     }
@@ -500,7 +576,7 @@ fn join_under_dest(
             });
         }
         current.push(component);
-        if !lexical_stays_under(&current, dest_canon) {
+        if !stays_under(&current, dest_canon) {
             return Err(ZipcoreError::PathTraversal {
                 entry: display_name.to_string(),
             });
@@ -519,7 +595,7 @@ fn join_under_dest(
             }
         }
     }
-    if !lexical_stays_under(&current, dest_canon) {
+    if !stays_under(&current, dest_canon) {
         return Err(ZipcoreError::PathTraversal {
             entry: display_name.to_string(),
         });
@@ -531,6 +607,11 @@ fn join_under_dest(
 pub(crate) fn unsafe_entry_reason(raw: &[u8], display: &str) -> Option<&'static str> {
     if raw.contains(&0) || display.contains('\0') {
         return Some("NUL");
+    }
+    let unified = display.replace('\\', "/");
+    let trimmed = unified.trim_matches('/');
+    if trimmed.is_empty() || trimmed.split('/').all(|c| c.is_empty() || c == ".") {
+        return Some("empty");
     }
     if raw_escapes(raw) {
         return Some("raw");
@@ -683,7 +764,7 @@ struct ExtractSession {
 
 impl ExtractSession {
     fn ensure_dir(&mut self, dir: &Path) -> Result<(), ZipcoreError> {
-        if !lexical_stays_under(dir, &self.dest_canon) {
+        if !stays_under(dir, &self.dest_canon) {
             return Err(ZipcoreError::PathTraversal {
                 entry: dir.display().to_string(),
             });
@@ -695,7 +776,7 @@ impl ExtractSession {
                 break;
             }
             missing.push(cur.clone());
-            if cur == self.dest_canon {
+            if path_eq(&cur, &self.dest_canon) {
                 break;
             }
             match cur.parent() {
@@ -766,111 +847,6 @@ fn unique_tmp(dest: &Path) -> PathBuf {
     ))
 }
 
-fn place_extracted(from: &Path, to: &Path) -> io::Result<Option<PathBuf>> {
-    if !to.exists() {
-        if fs::rename(from, to).is_ok() {
-            return Ok(None);
-        }
-        if let Err(e) = fs::copy(from, to) {
-            let _ = fs::remove_file(to);
-            return Err(e);
-        }
-        let _ = fs::remove_file(from);
-        return Ok(None);
-    }
-    let backup = unique_sidecar(to, "bak");
-    fs::rename(to, &backup)?;
-    let placed = fs::rename(from, to).or_else(|_| {
-        fs::copy(from, to)?;
-        fs::remove_file(from)?;
-        Ok(())
-    });
-    match placed {
-        Ok(()) => Ok(Some(backup)),
-        Err(e) => {
-            let _ = fs::rename(&backup, to);
-            Err(e)
-        }
-    }
-}
-
-fn unique_sidecar(path: &Path, kind: &str) -> PathBuf {
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let mut name = path.as_os_str().to_os_string();
-    name.push(format!(".{kind}.{}.{}", std::process::id(), n));
-    PathBuf::from(name)
-}
-
-fn check_cancel(cancel: &AtomicBool) -> Result<(), ZipcoreError> {
-    if cancel.load(Ordering::Relaxed) {
-        Err(ZipcoreError::Cancelled)
-    } else {
-        Ok(())
-    }
-}
-
-fn absolute(path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(path))
-            .unwrap_or_else(|_| path.to_path_buf())
-    }
-}
-
-fn strip_verbatim(path: &Path) -> PathBuf {
-    let s = path.to_string_lossy();
-    if let Some(rest) = s.strip_prefix(r"\\?\") {
-        if let Some(unc) = rest.strip_prefix(r"UNC\") {
-            PathBuf::from(format!(r"\\{unc}"))
-        } else {
-            PathBuf::from(rest.to_string())
-        }
-    } else {
-        path.to_path_buf()
-    }
-}
-
-fn normalize_lexically(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in path.components() {
-        match c {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-fn path_eq(a: &Path, b: &Path) -> bool {
-    let a = strip_verbatim(&normalize_lexically(a));
-    let b = strip_verbatim(&normalize_lexically(b));
-    a == b || a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
-}
-
-fn lexical_stays_under(child: &Path, parent: &Path) -> bool {
-    stays_under(&normalize_lexically(child), &normalize_lexically(parent))
-}
-
-fn stays_under(child: &Path, parent: &Path) -> bool {
-    let child = strip_verbatim(child);
-    let parent = strip_verbatim(parent);
-    if child.starts_with(&parent) {
-        return true;
-    }
-    let child_s = child.to_string_lossy().to_lowercase();
-    let parent_s = parent.to_string_lossy().to_lowercase();
-    if child_s == parent_s {
-        return true;
-    }
-    child_s.starts_with(&format!("{parent_s}/")) || child_s.starts_with(&format!("{parent_s}\\"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -885,6 +861,9 @@ mod tests {
         assert!(unsafe_entry_reason(b"ok/file.txt", "ok/file.txt").is_none());
         assert!(unsafe_entry_reason(b"dir/", "dir/").is_none());
         assert!(unsafe_entry_reason("が.txt".as_bytes(), "が.txt").is_none());
+        assert!(unsafe_entry_reason(b"", "").is_some());
+        assert!(unsafe_entry_reason(b".", ".").is_some());
+        assert!(unsafe_entry_reason(b"././.", "././.").is_some());
     }
 
     #[test]

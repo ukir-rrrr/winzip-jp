@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
@@ -13,11 +13,14 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::encoding::{encode_entry_name, is_junk, Unmappable};
 use crate::error::ZipcoreError;
+use crate::fsutil::{absolute, atomic_replace, normalize_lexically, path_eq, stays_under};
+use crate::job::check_cancel;
 use crate::pkzip::{
     inspect_zip, patch_local_sizes, write_central_header, write_eocd, write_local_header,
     CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED,
 };
 
+pub use crate::job::{Progress, ProgressPhase, SecretString};
 pub use crate::pkzip::InspectedEntry;
 
 const COPY_BUF: usize = 64 * 1024;
@@ -29,26 +32,6 @@ const DEFLATE_LEVEL: u32 = 6;
 pub enum AesMode {
     #[default]
     Aes256,
-}
-
-/// パスワード。Debug に中身を出さない。AES 書き込みは PR 6。
-#[derive(Clone)]
-pub struct SecretString(String);
-
-impl SecretString {
-    pub fn new(s: impl Into<String>) -> Self {
-        Self(s.into())
-    }
-
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for SecretString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("SecretString(***)")
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -84,25 +67,6 @@ pub struct Plan {
     pub issues: Vec<Unmappable>,
     pub excluded: Vec<String>,
     pub total_uncompressed: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ProgressPhase {
-    Starting,
-    Writing,
-    Finishing,
-    Done,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Progress {
-    pub phase: ProgressPhase,
-    pub current_entry: Option<String>,
-    pub entries_done: u32,
-    pub entries_total: u32,
-    pub bytes_done: u64,
-    pub bytes_total: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -634,19 +598,11 @@ fn nfc_os(name: impl Into<PathBuf>) -> String {
     name.into().to_string_lossy().nfc().collect()
 }
 
-fn check_cancel(cancel: &AtomicBool) -> Result<(), ZipcoreError> {
-    if cancel.load(Ordering::Relaxed) {
-        Err(ZipcoreError::Cancelled)
-    } else {
-        Ok(())
-    }
-}
-
 fn dest_overlaps_input(dest: &Path, inputs: &[InputItem], plan: &Plan) -> bool {
     let dest = resolve_dest(dest);
     inputs.iter().any(|item| {
         let input = resolve_existing(&item.abs_path);
-        path_eq(&dest, &input) || (item.as_dir && path_under(&dest, &input))
+        path_eq(&dest, &input) || (item.as_dir && stays_under(&dest, &input))
     }) || plan
         .entries
         .iter()
@@ -660,45 +616,13 @@ fn partial_path(dest: &Path) -> PathBuf {
 }
 
 fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
-    if fs::rename(from, to).is_ok() {
-        return Ok(());
-    }
-    if !to.exists() {
-        // dest は新規。copy が途中で落ちたら中途半端な dest を残さない。
-        if let Err(e) = fs::copy(from, to) {
-            let _ = fs::remove_file(to);
-            return Err(e);
-        }
-        let _ = fs::remove_file(from);
-        return Ok(());
-    }
-    // Windows など rename が既存 dest を置換できない場合。dest は消さず退避する。
-    // `.bak` 固定だと利用者が置いた同名ファイルを上書き・削除するので一意にする。
-    let backup = unique_sidecar(to, "bak");
-    fs::rename(to, &backup)?;
-    let placed = fs::rename(from, to).or_else(|_| {
-        fs::copy(from, to)?;
-        fs::remove_file(from)?;
-        Ok(())
-    });
-    match placed {
-        Ok(()) => {
+    match atomic_replace(from, to)? {
+        Some(backup) => {
             let _ = fs::remove_file(&backup);
             Ok(())
         }
-        Err(e) => {
-            let _ = fs::rename(&backup, to);
-            Err(e)
-        }
+        None => Ok(()),
     }
-}
-
-fn unique_sidecar(path: &Path, kind: &str) -> PathBuf {
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let mut name = path.as_os_str().to_os_string();
-    name.push(format!(".{kind}.{}.{}", std::process::id(), n));
-    PathBuf::from(name)
 }
 
 fn resolve_dest(path: &Path) -> PathBuf {
@@ -719,46 +643,4 @@ fn resolve_dest(path: &Path) -> PathBuf {
 fn resolve_existing(path: &Path) -> PathBuf {
     let abs = normalize_lexically(&absolute(path));
     fs::canonicalize(&abs).unwrap_or(abs)
-}
-
-fn normalize_lexically(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in path.components() {
-        match c {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-fn path_eq(a: &Path, b: &Path) -> bool {
-    a == b || a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
-}
-
-fn path_under(child: &Path, parent: &Path) -> bool {
-    if child.starts_with(parent) {
-        return true;
-    }
-    let child_s = child.to_string_lossy();
-    let parent_s = parent.to_string_lossy();
-    let child_l = child_s.to_lowercase();
-    let parent_l = parent_s.to_lowercase();
-    if child_l == parent_l {
-        return true;
-    }
-    child_l.starts_with(&format!("{parent_l}/")) || child_l.starts_with(&format!("{parent_l}\\"))
-}
-
-fn absolute(path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(path))
-            .unwrap_or_else(|_| path.to_path_buf())
-    }
 }

@@ -294,6 +294,78 @@ fn extract_rejects_nul() {
 }
 
 #[test]
+fn extract_rejects_empty_and_dot_only_names() {
+    assert_extract_traversal(b"");
+    assert_extract_traversal(b".");
+    assert_extract_traversal(b"././.");
+}
+
+#[test]
+fn extract_rejects_file_vs_dir_collision() {
+    let tmp = support::TempDir::new();
+    let zip = tmp.path().join("c.zip");
+    write_stored_zip(
+        &zip,
+        &[(b"foo/bar.txt", b"nested", 0), (b"foo", b"file", 0)],
+    );
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(&dest).unwrap();
+    let err = extract_zip(
+        extract_req(zip.clone(), dest.clone(), false),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ZipcoreError::Corrupt(_) | ZipcoreError::PathTraversal { .. }
+        ),
+        "{err}"
+    );
+    assert!(!dest.join("foo").exists() || dest.join("foo").is_dir());
+    let list_err = list_zip(ListRequest {
+        archive: zip,
+        encoding: None,
+    })
+    .unwrap_err();
+    assert!(
+        matches!(
+            list_err,
+            ZipcoreError::Corrupt(_) | ZipcoreError::PathTraversal { .. }
+        ),
+        "{list_err}"
+    );
+}
+
+#[test]
+fn extract_refuses_to_replace_directory_with_file() {
+    let tmp = support::TempDir::new();
+    let zip = tmp.path().join("c.zip");
+    write_stored_zip(&zip, &[(b"foo", b"file", 0)]);
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(dest.join("foo")).unwrap();
+    fs::write(dest.join("foo").join("keep.txt"), b"keep").unwrap();
+    let err = extract_zip(
+        extract_req(zip, dest.clone(), true),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ZipcoreError::Corrupt(_) | ZipcoreError::OverwriteRequired { .. }
+        ),
+        "{err}"
+    );
+    assert_eq!(
+        fs::read(dest.join("foo").join("keep.txt")).unwrap(),
+        b"keep"
+    );
+}
+
+#[test]
 fn extract_rejects_unc() {
     assert_extract_traversal(br"\\server\share\evil");
     assert_extract_traversal(b"//server/share/evil");

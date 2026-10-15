@@ -68,7 +68,7 @@ impl fmt::Display for ZipcoreError {
             Self::EmptyInputs => write!(f, "追加できるファイルがありません"),
             Self::Cancelled => write!(f, "キャンセルされました"),
             Self::AesNotImplemented => {
-                write!(f, "パスワード付き ZIP はこのバージョンではまだ作れません")
+                write!(f, "パスワード付き ZIP はこのバージョンではまだ扱えません")
             }
             Self::SplitNotImplemented => {
                 write!(f, "分割 ZIP はこのバージョンではまだ作れません")
