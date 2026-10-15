@@ -22,10 +22,8 @@ pub use sandbox::Sandbox;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(all(debug_assertions, feature = "e2e"))]
-    if let Some(args) = e2e_open::parse() {
-        if let Some(code) = e2e_open::run_probe_if_requested(&args) {
-            std::process::exit(code);
-        }
+    if let Some(code) = e2e_open::maybe_run() {
+        std::process::exit(code);
     }
 
     tauri::Builder::default()

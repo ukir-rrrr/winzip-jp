@@ -1,7 +1,7 @@
 //! サンドボックス検証。画面は使わずコマンドの Result だけを見る。
 //!
-//! `--e2e-open` CLI は `e2e_open`（debug + feature=e2e）から呼ぶ。
-//! このモジュールは grant しない。開くパスは呼び出し側が `Sandbox::grant` する。
+//! 開くパス・分割の入力・保存先はここで `Sandbox::grant` / `grant_save_dest` する。
+//! CLI（`e2e_open`）は JSON を stdout に出すだけで grant しない。
 
 use std::fs;
 use std::path::{Path, PathBuf};

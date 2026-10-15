@@ -239,14 +239,18 @@ fn e2e_open_is_cfg_gated_in_source() {
         "probe を release / App Store に入れない"
     );
     assert!(
-        !lib.contains("e2e_open::parse") || lib.contains("feature = \"e2e\""),
-        "e2e_open の呼び出しが feature で囲まれていること"
+        lib.contains("e2e_open::maybe_run"),
+        "e2e は maybe_run でヘッドレス終了する"
     );
     let open = read(&tauri_dir().join("src/e2e_open.rs"));
     assert!(open.contains("--e2e-open"));
     assert!(open.contains("--e2e-deny"));
-    assert!(open.contains("--e2e-report"));
     assert!(open.contains("--e2e-split-dest"));
+    assert!(
+        !open.contains("--e2e-report"),
+        "レポートは stdout。サンドボックスはワークスペースへ書けない"
+    );
+    assert!(open.contains("maybe_run"), "不完全フラグで GUI に落とさない");
 }
 
 #[test]
@@ -267,6 +271,10 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
     assert!(
         !sh.contains("if ! sign"),
         "TEAM_ID 除去を codesign 失敗後のフォールバックにしない"
+    );
+    assert!(
+        !sh.contains("--e2e-report") && sh.contains("> \"$REPORT\""),
+        "probe JSON は stdout リダイレクト。サンドボックスは成果物ディレクトリへ書けない"
     );
     let pkg = read(&tauri_dir().join("../scripts/appstore-pkg.sh"));
     assert!(pkg.contains("送りZIP.app"));

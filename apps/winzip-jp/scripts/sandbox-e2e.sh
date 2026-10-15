@@ -86,43 +86,25 @@ fi
 REPORT="$ARTIFACTS/sandbox-probe.json"
 SPLIT_OUT="$ARTIFACTS/e2e-split-outside/out.zip"
 mkdir -p "$(dirname "$SPLIT_OUT")"
+# JSON は stdout。サンドボックスはワークスペースへ書けない。判定は report_passes（終了コード）。
+set +e
 "$BIN" \
   --e2e-open "$FIXTURE" \
   --e2e-deny "$DENY" \
   --e2e-split-dest "$SPLIT_OUT" \
-  --e2e-report "$REPORT"
-
-python3 - "$REPORT" <<'PY'
-import json, sys
-path = sys.argv[1]
-report = json.loads(open(path, encoding="utf-8").read())
-print(json.dumps(report, ensure_ascii=False, indent=2))
-open_ok = report.get("open", {}).get("ok")
-deny = report.get("deny", {})
-deny_ok = deny.get("ok")
-deny_err = deny.get("error") or ""
-split = report.get("splitContainer") or {}
-if not open_ok:
-    raise SystemExit(f"フィクスチャを読めません: {report.get('open')}")
-if deny_ok:
-    raise SystemExit(f"無関係パスが読めてしまう: {deny}")
-if "アクセスできません" not in deny_err:
-    raise SystemExit(f"拒否がコマンド Err ではない: {deny_err!r}")
-if not split.get("ok") or not split.get("z01"):
-    raise SystemExit(f"コンテナ内の分割保存に失敗: {split}")
-outside = report.get("splitOutside")
-if outside is None:
-    raise SystemExit("splitOutside がありません")
-if outside.get("ok"):
-    raise SystemExit(f"サンドボックス外への分割保存が成功した: {outside}")
-err = outside.get("error") or ""
-if not any(
-    s in err
-    for s in ("権限がありません", "アクセスできません", "見つかりません", "保存先へ移せませんでした")
-):
-    raise SystemExit(f"外側分割の失敗が日本語 Err ではない: {err!r}")
-print("sandbox probe ok")
-PY
+  > "$REPORT"
+status=$?
+set -e
+if [[ ! -s "$REPORT" ]]; then
+  echo "sandbox-probe.json が空です (exit=${status})" >&2
+  exit 1
+fi
+python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), ensure_ascii=False, indent=2))' "$REPORT"
+if [[ "$status" -ne 0 ]]; then
+  echo "sandbox probe 失敗: exit=${status}" >&2
+  exit "$status"
+fi
+echo "sandbox probe ok"
 
 # S1 相当: 起動直後の作成ドロップゾーン。フィクスチャは開かない。
 open "$APP" || true
