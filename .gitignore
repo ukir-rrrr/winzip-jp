@@ -13,3 +13,5 @@ dist-ssr/
 
 apps/winzip-jp/e2e/artifacts/*.png
 apps/winzip-jp/src-tauri/gen/
+
+.taste-skill/
