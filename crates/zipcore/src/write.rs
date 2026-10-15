@@ -150,6 +150,24 @@ pub fn write_zip(
             dest: req.dest.clone(),
         });
     }
+    if let Some(n) = req.split_bytes {
+        let extra = if req.password.is_some() {
+            aes_extra_field(METHOD_DEFLATE).len() as u64
+        } else {
+            0
+        };
+        let need = plan
+            .entries
+            .iter()
+            .map(|e| 30 + e.name_raw.len() as u64 + if e.is_dir { 0 } else { extra })
+            .max()
+            .unwrap_or(30);
+        if n < need {
+            return Err(ZipcoreError::InvalidSplit {
+                reason: format!("ヘッダ（{need} バイト）より小さい分割サイズは使えません"),
+            });
+        }
+    }
 
     let dest = req.dest.clone();
     let password = req.password.as_ref().map(SecretString::expose_bytes);

@@ -444,6 +444,32 @@ fn zero_split_bytes_is_rejected() {
 }
 
 #[test]
+fn split_bytes_smaller_than_local_header_is_rejected() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("が.txt"), b"x");
+    let dest = tmp.path().join("out.zip");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src.join("が.txt"),
+            as_dir: false,
+        }],
+        dest,
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: Some(20),
+        replacements: BTreeMap::new(),
+    };
+    let err = write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_err();
+    match err {
+        ZipcoreError::InvalidSplit { reason } => {
+            assert!(reason.contains("ヘッダ"), "{reason}");
+        }
+        other => panic!("expected InvalidSplit, got {other}"),
+    }
+}
+
+#[test]
 fn aes_zip_sets_encrypt_bit_and_9901_and_keeps_cp932_names() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("src");
