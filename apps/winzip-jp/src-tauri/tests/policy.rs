@@ -276,6 +276,10 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
         !sh.contains("--e2e-report") && sh.contains("> \"$REPORT\""),
         "probe JSON は stdout リダイレクト。サンドボックスは成果物ディレクトリへ書けない"
     );
+    assert!(
+        !sh.contains("codesign --force --deep"),
+        "codesign --deep は WebView ヘルパーを壊す"
+    );
     let pkg = read(&tauri_dir().join("../scripts/appstore-pkg.sh"));
     assert!(pkg.contains("送りZIP.app"));
     assert!(!pkg.contains("| head -1") && !pkg.contains("| head -n 1"));

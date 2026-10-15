@@ -55,7 +55,8 @@ for key, value in list(data.items()):
         data.pop(key)
 plistlib.dump(data, dst.open("wb"))
 PY
-codesign --force --deep --entitlements "$TMP_ENT" --sign - "$APP"
+# --deep は WKWebView ヘルパーにアプリ entitlements を押し付けるので使わない。
+codesign --force --entitlements "$TMP_ENT" --sign - "$APP"
 rm -f "$TMP_ENT"
 
 codesign --verify --verbose=2 "$APP"
@@ -108,7 +109,9 @@ echo "sandbox probe ok"
 
 # S1 相当: 起動直後の作成ドロップゾーン。フィクスチャは開かない。
 open "$APP" || true
-sleep 6
+sleep 2
+osascript -e 'tell application "送りZIP" to activate' >/dev/null 2>&1 || true
+sleep 10
 screencapture -x "$ARTIFACTS/s1-sandbox.png" || true
 # スクリプト自身（パスに winzip-jp を含む）は殺さない
 killall "送りZIP" >/dev/null 2>&1 || true
