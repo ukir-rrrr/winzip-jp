@@ -55,7 +55,7 @@ jobs:
 
   tauri-sandbox:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -64,8 +64,59 @@ jobs:
           workspaces: |
             . -> target
             apps/winzip-jp/src-tauri -> apps/winzip-jp/src-tauri/target
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
       - name: Test Tauri commands and sandbox policy
         run: cargo test -p winzip-jp
+      - name: Test e2e-open probe (debug feature)
+        run: cargo test -p winzip-jp --features e2e
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Sandbox E2E (ad-hoc sign, --e2e-open, S1)
+        run: bash apps/winzip-jp/scripts/sandbox-e2e.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sandbox-e2e
+          path: |
+            apps/winzip-jp/e2e/artifacts/s1-sandbox.png
+            apps/winzip-jp/e2e/artifacts/sandbox-probe.json
+            apps/winzip-jp/e2e/artifacts/signed-entitlements.xml
+          if-no-files-found: error
+
+  tauri-appstore-pkg:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            apps/winzip-jp/src-tauri -> apps/winzip-jp/src-tauri/target
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+      - name: App Store bundle to .pkg (--no-upload)
+        run: bash apps/winzip-jp/scripts/appstore-pkg.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: appstore-pkg
+          path: apps/winzip-jp/e2e/artifacts/winzip-jp.pkg
+          if-no-files-found: error
 
   ui-e2e:
     runs-on: macos-15

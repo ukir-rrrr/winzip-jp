@@ -6,9 +6,12 @@
     }
   },
   "bundle": {
+    "category": "Utility",
     "macOS": {
       "entitlements": "Entitlements.plist",
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "15.0",
+      "infoPlist": "Info.plist"
     }
   }
 }

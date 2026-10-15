@@ -505,4 +505,16 @@ mod tests {
         assert!(text.contains("読み書きに失敗しました"));
         assert!(text.contains(path));
     }
+
+    #[test]
+    fn publish_permission_denied_is_japanese() {
+        let err = PublishError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "Operation not permitted",
+        ));
+        assert_eq!(
+            publish_err_ja(err),
+            "保存先へ移せませんでした: 権限がありません"
+        );
+    }
 }
