@@ -1,5 +1,6 @@
 //! ダイアログを使わずパス直指定で create / list / extract を通す。
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,10 +8,12 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use winzip_jp_lib::{
-    create_archive_direct, extract_archive_direct, list_archive_direct, CreateDto, ExtractDto,
-    Sandbox, PROGRESS_EVENT,
+    create_archive_direct, extract_archive_direct, list_archive_direct, names_are_ready,
+    plan_archive_direct, CreateDto, ExtractDto, Sandbox, PROGRESS_EVENT,
 };
-use zipcore::{inspect_zip_headers, NameEncoding, Progress, ProgressPhase, EFS_UTF8_BIT};
+use zipcore::{
+    encode_entry_name, inspect_zip_headers, NameEncoding, Progress, ProgressPhase, EFS_UTF8_BIT,
+};
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -123,6 +126,70 @@ fn create_list_extract_with_direct_paths() {
 
     assert!(dest.exists());
     assert!(!dest.with_extension("zip.partial").exists());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_names_matches_encode_entry_name_issues() {
+    assert!(names_are_ready(&["高.png".into(), "★.png".into()]));
+    assert!(!names_are_ready(&["é.png".into()]));
+    assert!(!names_are_ready(&["ü.png".into()]));
+    assert!(!names_are_ready(&["😀.png".into()]));
+    assert!(!names_are_ready(&["髙.png".into()]));
+    assert_eq!(encode_entry_name("★.png").issues.len(), 0);
+    assert!(!encode_entry_name("é.png").issues.is_empty());
+}
+
+#[test]
+fn plan_archive_lists_unmappable_taka() {
+    let src = workspace_root().join("tests/golden/04-replacements/src");
+    let mut sandbox = Sandbox::new();
+    sandbox.grant(&src);
+    let plan = plan_archive_direct(&sandbox, &[src.to_string_lossy().into_owned()], None)
+        .expect("plan");
+    let json = serde_json::to_value(&plan).expect("plan json");
+    let issues = json["issues"].as_array().expect("issues");
+    assert!(
+        issues.iter().any(|issue| {
+            issue["relativePath"]
+                .as_str()
+                .is_some_and(|p| p.contains('髙'))
+                && issue["suggested"].as_str().is_some_and(|s| s.contains('高'))
+        }),
+        "{json}"
+    );
+    assert!(issues[0].get("relativePath").is_some(), "{json}");
+    assert!(issues[0].get("relative_path").is_none(), "{json}");
+}
+
+#[test]
+fn create_archive_writes_replaced_name_as_cp932() {
+    let root = unique_dir("repl-bytes");
+    let src = root.join("髙.png");
+    fs::write(&src, b"img").unwrap();
+    let dest = root.join("out.zip");
+    let sandbox = grant(&[&root, &src, &dest]);
+    let cancel = AtomicBool::new(false);
+    let mut replacements = BTreeMap::new();
+    replacements.insert("髙.png".into(), "高.png".into());
+    create_archive_direct(
+        &sandbox,
+        &CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements,
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &cancel,
+    )
+    .expect("create");
+    let headers = inspect_zip_headers(&dest).unwrap();
+    let entry = headers
+        .iter()
+        .find(|e| !e.name_raw.ends_with(b"/"))
+        .expect("file entry");
+    assert_eq!(hex(&entry.name_raw), "8D822E706E67");
+    assert_eq!(entry.gpbf & EFS_UTF8_BIT, 0);
     let _ = fs::remove_dir_all(&root);
 }
 

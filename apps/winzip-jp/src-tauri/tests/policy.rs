@@ -90,6 +90,14 @@ fn appstore_entitlements_match_design_section_4_1() {
         json.get("plugins").is_none() || json["plugins"].get("persisted-scope").is_none(),
         "persisted-scope を付けない"
     );
+    assert!(
+        appstore.contains("Entitlements.plist"),
+        "提出用設定が entitlements を指していない"
+    );
+    assert!(
+        !appstore.contains("wdio") && !appstore.contains("e2e"),
+        "提出用設定に Webdriver を入れない"
+    );
 }
 
 #[test]
@@ -97,6 +105,7 @@ fn fs_scope_does_not_include_home() {
     let mut files = vec![
         tauri_dir().join("tauri.conf.json"),
         tauri_dir().join("tauri.appstore.conf.json"),
+        tauri_dir().join("tauri.e2e.conf.json"),
         tauri_dir().join("capabilities/default.json"),
         tauri_dir().join("Cargo.toml"),
         tauri_dir().join("Entitlements.plist"),
@@ -134,6 +143,30 @@ fn fs_scope_does_not_include_home() {
             );
         }
     }
+}
+
+#[test]
+fn capabilities_are_pinned_to_default() {
+    for name in ["tauri.conf.json", "tauri.appstore.conf.json", "tauri.e2e.conf.json"] {
+        let json: serde_json::Value =
+            serde_json::from_str(&read(&tauri_dir().join(name))).expect(name);
+        assert_eq!(
+            json["app"]["security"]["capabilities"],
+            serde_json::json!(["default"]),
+            "{name} の capabilities が default に固定されていない"
+        );
+    }
+    assert!(
+        !tauri_dir().join("capabilities/e2e.json").exists(),
+        "e2e.json は全ビルドに載るので置かない"
+    );
+    let mut names: Vec<String> = fs::read_dir(tauri_dir().join("capabilities"))
+        .expect("capabilities")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["default.json".to_string()]);
 }
 
 #[test]

@@ -11,7 +11,7 @@ dist-ssr/
 *.log
 .DS_Store
 
-apps/winzip-jp/e2e/artifacts/*.png
+apps/winzip-jp/e2e/artifacts/
 apps/winzip-jp/src-tauri/gen/
 
 .taste-skill/

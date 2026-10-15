@@ -8,17 +8,25 @@ import "@mantine/core/styles/default-css-variables.css";
 import "@mantine/core/styles/global.css";
 import "@mantine/core/styles/UnstyledButton.css";
 import "@mantine/core/styles/Title.css";
-import "@mantine/core/styles/Button.css";
 import "@mantine/core/styles/Text.css";
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <MantineProvider
-      theme={theme}
-      cssVariablesResolver={cssVariablesResolver}
-      defaultColorScheme="auto"
-    >
-      <App />
-    </MantineProvider>
-  </React.StrictMode>,
-);
+async function boot() {
+  if (import.meta.env.VITE_E2E === "1") {
+    const { installE2eHarness } = await import("./e2e/harness");
+    await installE2eHarness();
+  }
+
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <MantineProvider
+        theme={theme}
+        cssVariablesResolver={cssVariablesResolver}
+        defaultColorScheme="auto"
+      >
+        <App />
+      </MantineProvider>
+    </React.StrictMode>,
+  );
+}
+
+void boot();

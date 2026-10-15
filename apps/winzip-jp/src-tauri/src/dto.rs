@@ -60,9 +60,29 @@ pub struct ListReportDto {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UnmappableDto {
+    pub relative_path: String,
+    pub original_char: String,
+    pub suggested: String,
+    pub kind: zipcore::UnmappableKind,
+}
+
+impl From<zipcore::Unmappable> for UnmappableDto {
+    fn from(value: zipcore::Unmappable) -> Self {
+        Self {
+            relative_path: value.relative_path,
+            original_char: value.original_char,
+            suggested: value.suggested,
+            kind: value.kind,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PlanDto {
     pub entries: Vec<String>,
-    pub issues: Vec<zipcore::Unmappable>,
+    pub issues: Vec<UnmappableDto>,
     pub excluded: Vec<String>,
     pub dest_name_hint: Option<String>,
 }
@@ -130,7 +150,7 @@ impl PlanDto {
     pub fn from_plan(plan: Plan, dest_name_hint: Option<String>) -> Self {
         Self {
             entries: plan.entries.into_iter().map(|e| e.relative_path).collect(),
-            issues: plan.issues,
+            issues: plan.issues.into_iter().map(UnmappableDto::from).collect(),
             excluded: plan.excluded,
             dest_name_hint,
         }
@@ -178,4 +198,25 @@ pub fn starting_progress() -> Progress {
 
 pub fn path_buf(s: &str) -> PathBuf {
     PathBuf::from(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unmappable_dto_uses_camel_case() {
+        let dto = UnmappableDto {
+            relative_path: "髙.png".into(),
+            original_char: "髙".into(),
+            suggested: "高".into(),
+            kind: zipcore::UnmappableKind::CompatIdeograph,
+        };
+        let value = serde_json::to_value(&dto).expect("json");
+        assert_eq!(value["relativePath"], "髙.png");
+        assert_eq!(value["originalChar"], "髙");
+        assert_eq!(value["suggested"], "高");
+        assert_eq!(value["kind"], "compatIdeograph");
+        assert!(value.get("relative_path").is_none());
+    }
 }

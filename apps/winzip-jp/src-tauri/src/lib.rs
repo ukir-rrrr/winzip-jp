@@ -8,9 +8,9 @@ use tauri::Manager;
 
 pub use commands::{
     accepted_dropped_paths, create_archive_direct, extract_archive_direct, list_archive_direct,
-    plan_archive_direct, PROGRESS_EVENT,
+    names_are_ready, plan_archive_direct, PROGRESS_EVENT,
 };
-pub use dto::{CreateDto, ExtractDto, ListReportDto, WriteReportDto};
+pub use dto::{CreateDto, ExtractDto, ListReportDto, PlanDto, WriteReportDto};
 pub use sandbox::Sandbox;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,6 +21,7 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             commands::plan_archive,
+            commands::check_names,
             commands::create_archive,
             commands::list_archive,
             commands::extract_archive,
