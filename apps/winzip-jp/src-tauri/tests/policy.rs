@@ -235,6 +235,10 @@ fn e2e_open_is_cfg_gated_in_source() {
         "--e2e-open を App Store ビルドに入れない"
     );
     assert!(
+        lib.contains("cfg(any(test, all(debug_assertions, feature = \"e2e\")))"),
+        "probe を release / App Store に入れない"
+    );
+    assert!(
         !lib.contains("e2e_open::parse") || lib.contains("feature = \"e2e\""),
         "e2e_open の呼び出しが feature で囲まれていること"
     );
@@ -242,4 +246,33 @@ fn e2e_open_is_cfg_gated_in_source() {
     assert!(open.contains("--e2e-open"));
     assert!(open.contains("--e2e-deny"));
     assert!(open.contains("--e2e-report"));
+    assert!(open.contains("--e2e-split-dest"));
+}
+
+#[test]
+fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
+    let sh = read(&tauri_dir().join("../scripts/sandbox-e2e.sh"));
+    assert!(
+        sh.contains("送りZIP.app"),
+        "バンドルパスを find | head にしない"
+    );
+    assert!(
+        !sh.contains("| head -1") && !sh.contains("| head -n 1"),
+        "find | head で別 .app を拾わない"
+    );
+    assert!(
+        sh.contains("data.pop(key") || sh.contains("com.apple.developer.team-identifier"),
+        "ad-hoc 署名前に $TEAM_ID を外す"
+    );
+    assert!(
+        !sh.contains("if ! sign"),
+        "TEAM_ID 除去を codesign 失敗後のフォールバックにしない"
+    );
+    let pkg = read(&tauri_dir().join("../scripts/appstore-pkg.sh"));
+    assert!(pkg.contains("送りZIP.app"));
+    assert!(!pkg.contains("| head -1") && !pkg.contains("| head -n 1"));
+    assert!(
+        pkg.contains("Info.plist がありません"),
+        "Info.plist 欠落をスキップしない"
+    );
 }

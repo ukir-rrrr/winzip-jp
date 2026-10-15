@@ -1,7 +1,9 @@
 mod commands;
 mod dto;
-mod probe;
 mod sandbox;
+
+#[cfg(any(test, all(debug_assertions, feature = "e2e")))]
+mod probe;
 
 #[cfg(all(debug_assertions, feature = "e2e"))]
 mod e2e_open;
@@ -15,7 +17,6 @@ pub use commands::{
     names_are_ready, plan_archive_direct, PROGRESS_EVENT,
 };
 pub use dto::{CreateDto, ExtractDto, ListReportDto, PlanDto, WriteReportDto};
-pub use probe::{build_report, ProbeReport};
 pub use sandbox::Sandbox;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,24 +26,12 @@ pub fn run() {
         if let Some(code) = e2e_open::run_probe_if_requested(&args) {
             std::process::exit(code);
         }
-        e2e_open::stash_for_ui(args);
     }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(AppState::new())
-        .setup(|app| {
-            #[cfg(all(debug_assertions, feature = "e2e"))]
-            {
-                let handle = app.handle().clone();
-                if let Some(state) = app.try_state::<AppState>() {
-                    e2e_open::apply_startup_grant(&state, &handle);
-                }
-            }
-            let _ = app;
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
             commands::plan_archive,
             commands::check_names,

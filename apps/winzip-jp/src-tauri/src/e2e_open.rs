@@ -1,12 +1,13 @@
 //! `--e2e-open` は debug + `feature = "e2e"` のときだけコンパイルする。
 //! App Store / release には引数名も残さない。
+//!
+//! `--e2e-report` 付きのときだけ動く（ヘッドレス）。報告なしの `--e2e-open` は無視し、
+//! 通常の作成画面（S1）を出す。
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
-use crate::commands::{grant_dropped, AppState};
-use crate::probe::build_report;
+use crate::probe::{build_report, report_passes};
 use crate::sandbox::Sandbox;
 
 const FLAG_OPEN: &str = "--e2e-open";
@@ -20,8 +21,6 @@ pub struct E2eArgs {
     pub report: Option<PathBuf>,
     pub split_outside: Option<PathBuf>,
 }
-
-static STARTUP: OnceLock<E2eArgs> = OnceLock::new();
 
 pub fn parse() -> Option<E2eArgs> {
     let mut args = std::env::args().skip(1);
@@ -47,7 +46,6 @@ pub fn parse() -> Option<E2eArgs> {
 }
 
 /// `--e2e-report` があるときはウィンドウを出さず JSON を書いて終了する。
-/// 戻り値の `Some` はプロセス終了コード。
 pub fn run_probe_if_requested(args: &E2eArgs) -> Option<i32> {
     let report_path = args.report.as_ref()?;
     let deny = args.deny.clone().unwrap_or_else(default_deny_path);
@@ -58,24 +56,16 @@ pub fn run_probe_if_requested(args: &E2eArgs) -> Option<i32> {
         &deny,
         args.split_outside.as_deref(),
     );
-    let json = serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".into());
+    let json = serde_json::to_vec_pretty(&report).unwrap_or_else(|_| b"{}".to_vec());
     if let Some(parent) = report_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
     let write_ok = fs::write(report_path, json).is_ok();
-    let pass = report.open.ok && !report.deny.ok && write_ok;
-    Some(if pass { 0 } else { 2 })
-}
-
-pub fn stash_for_ui(args: E2eArgs) {
-    let _ = STARTUP.set(args);
-}
-
-pub fn apply_startup_grant(state: &AppState, app: &tauri::AppHandle) {
-    let Some(args) = STARTUP.get() else {
-        return;
-    };
-    let _ = grant_dropped(state, app, &[args.open.clone()]);
+    Some(if write_ok && report_passes(&report) {
+        0
+    } else {
+        2
+    })
 }
 
 fn default_deny_path() -> PathBuf {
@@ -94,5 +84,6 @@ mod tests {
         assert_eq!(FLAG_OPEN, "--e2e-open");
         assert_eq!(FLAG_DENY, "--e2e-deny");
         assert_eq!(FLAG_REPORT, "--e2e-report");
+        assert_eq!(FLAG_SPLIT_OUT, "--e2e-split-dest");
     }
 }

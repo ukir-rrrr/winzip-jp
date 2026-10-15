@@ -13,6 +13,7 @@ use serde::Serialize;
 use crate::commands::{create_archive_direct, list_archive_direct};
 use crate::dto::CreateDto;
 use crate::sandbox::Sandbox;
+use zipcore::split::volume_path;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,14 +68,6 @@ fn unique_dir(label: &str) -> PathBuf {
     path
 }
 
-fn z01_for(dest: &Path) -> PathBuf {
-    let stem = dest
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "out".into());
-    dest.with_file_name(format!("{stem}.z01"))
-}
-
 fn split_once(sandbox: &mut Sandbox, dest: &Path) -> SplitProbe {
     let root = unique_dir("probe-split");
     let src = root.join("が.txt");
@@ -101,7 +94,7 @@ fn split_once(sandbox: &mut Sandbox, dest: &Path) -> SplitProbe {
         &AtomicBool::new(false),
     )
     .err();
-    let z01 = z01_for(dest);
+    let z01 = volume_path(dest, 1, false);
     SplitProbe {
         dest: path_str(dest),
         ok: err.is_none() && dest.exists(),
@@ -145,6 +138,32 @@ pub fn build_report(
     }
 }
 
+fn japanese_access_err(err: Option<&str>) -> bool {
+    let err = err.unwrap_or("");
+    err.contains("権限がありません")
+        || err.contains("アクセスできません")
+        || err.contains("見つかりません")
+        || err.contains("保存先へ移せませんでした")
+}
+
+/// フィクスチャ読取成功・無関係パス拒否・コンテナ内分割成功。
+/// 外側 dest があるときはカーネル／アプリ層で失敗していること。
+pub fn report_passes(report: &ProbeReport) -> bool {
+    let deny_err = report.deny.error.as_deref().unwrap_or("");
+    if !(report.open.ok
+        && !report.deny.ok
+        && deny_err.contains("アクセスできません")
+        && report.split_container.ok
+        && report.split_container.z01)
+    {
+        return false;
+    }
+    match &report.split_outside {
+        None => true,
+        Some(outside) => !outside.ok && japanese_access_err(outside.error.as_deref()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +188,7 @@ mod tests {
         assert!(report.split_container.ok, "{:?}", report.split_container);
         assert!(report.split_container.z01, "{:?}", report.split_container);
         assert!(report.split_outside.is_none());
+        assert!(report_passes(&report), "{report:?}");
     }
 
     #[test]
@@ -178,15 +198,13 @@ mod tests {
         let outside = unique_dir("probe-out").join("missing-parent").join("out.zip");
         let mut sandbox = Sandbox::new();
         let report = build_report(&mut sandbox, &zip, &deny, Some(&outside));
-        let split = report.split_outside.expect("outside");
+        let split = report.split_outside.as_ref().expect("outside");
         assert!(!split.ok, "{split:?}");
-        let err = split.error.as_deref().unwrap_or("");
         assert!(
-            err.contains("権限がありません")
-                || err.contains("アクセスできません")
-                || err.contains("見つかりません")
-                || err.contains("保存先へ移せませんでした"),
-            "{err}"
+            japanese_access_err(split.error.as_deref()),
+            "{:?}",
+            split.error
         );
+        assert!(report_passes(&report), "{report:?}");
     }
 }

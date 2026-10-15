@@ -15,42 +15,51 @@ pnpm exec tauri build \
   --config src-tauri/tauri.appstore.conf.json \
   --bundles app
 
-APP="$(find "$ROOT/target" "$TAURI/target" -path '*bundle/macos/*.app' -type d 2>/dev/null | grep -v /debug/ | head -1 || true)"
-if [[ -z "${APP}" ]]; then
-  APP="$(find "$ROOT/target/release" -name '*.app' -type d | head -1 || true)"
+APP="$ROOT/target/release/bundle/macos/送りZIP.app"
+if [[ ! -d "$APP" ]]; then
+  APP="$TAURI/target/release/bundle/macos/送りZIP.app"
 fi
-if [[ -z "${APP}" ]]; then
-  echo "App Store 用 .app が見つかりません" >&2
+if [[ ! -d "$APP" ]]; then
+  echo "App Store 用 .app が見つかりません: $ROOT/target/release/bundle/macos/送りZIP.app" >&2
   exit 1
 fi
 echo "app=${APP}"
 
-BIN="$(find "$APP/Contents/MacOS" -type f -perm -111 -print -quit)"
-if [[ -n "${BIN}" ]] && strings "$BIN" | grep -F -- "--e2e-open" >/dev/null; then
+BIN="$APP/Contents/MacOS/winzip-jp"
+if [[ ! -x "$BIN" ]]; then
+  BIN="$APP/Contents/MacOS/送りZIP"
+fi
+if [[ ! -x "$BIN" ]]; then
+  echo "実行ファイルがありません: $APP/Contents/MacOS" >&2
+  ls -la "$APP/Contents/MacOS" >&2 || true
+  exit 1
+fi
+if strings "$BIN" | grep -F -- "--e2e-open" >/dev/null; then
   echo "App Store バイナリに --e2e-open がある" >&2
   exit 1
 fi
 
 INFO="$APP/Contents/Info.plist"
-if [[ -f "$INFO" ]]; then
-  if ! grep -q ITSAppUsesNonExemptEncryption "$INFO"; then
-    echo "Info.plist に ITSAppUsesNonExemptEncryption がありません" >&2
-    exit 1
-  fi
-  if ! grep -q public.app-category.utilities "$INFO"; then
-    echo "Info.plist のカテゴリが Utility ではありません" >&2
-    exit 1
-  fi
+if [[ ! -f "$INFO" ]]; then
+  echo "Info.plist がありません: $INFO" >&2
+  exit 1
+fi
+if ! grep -q ITSAppUsesNonExemptEncryption "$INFO"; then
+  echo "Info.plist に ITSAppUsesNonExemptEncryption がありません" >&2
+  exit 1
+fi
+if ! grep -q public.app-category.utilities "$INFO"; then
+  echo "Info.plist のカテゴリが Utility ではありません" >&2
+  exit 1
 fi
 
 PKG="$ARTIFACTS/winzip-jp.pkg"
 # 提出キーがあっても upload しない（--no-upload）。
-if command -v productbuild >/dev/null; then
-  productbuild --component "$APP" /Applications "$PKG"
-else
+if ! command -v productbuild >/dev/null; then
   echo "productbuild がありません。pkg をスキップします" >&2
   exit 1
 fi
+productbuild --component "$APP" /Applications "$PKG"
 
 if [[ ! -s "$PKG" ]]; then
   echo ".pkg が空です" >&2
