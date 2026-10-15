@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::Emitter;
+use zipcore::split::is_split_sibling;
 use zipcore::{
     absolute, encode_entry_name, extract_zip, inspect_zip_headers, list_zip, normalize_lexically,
     path_eq, plan_write, stays_under, write_zip, AesMode, ExtractRequest, InputItem, ListRequest,
@@ -135,7 +136,9 @@ pub fn create_archive_direct(
     let inputs = resolve_inputs(sandbox, &req.paths)?;
     planned_sources_in_scope(sandbox, &inputs)?;
     if inputs.iter().any(|item| {
-        path_eq(&dest, &item.abs_path) || (item.as_dir && stays_under(&dest, &item.abs_path))
+        path_eq(&dest, &item.abs_path)
+            || is_split_sibling(&dest, &item.abs_path)
+            || (item.as_dir && stays_under(&dest, &item.abs_path))
     }) {
         return Err(map_err(ZipcoreError::DestOverlapsInput {
             dest: dest.clone(),

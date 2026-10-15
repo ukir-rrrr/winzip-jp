@@ -94,6 +94,8 @@ struct Grant {
     path: PathBuf,
     /// フォルダ選択 / フォルダドロップだけ true。保存先ファイルは false。
     recursive: bool,
+    /// `grant_save_dest` の ZIP。兄弟 `.zNN` の `resolve_save_file` はこれだけ。
+    save_dest: bool,
     #[cfg(target_os = "macos")]
     _access: Option<scoped::ScopedUrl>,
 }
@@ -117,7 +119,7 @@ impl Sandbox {
         }
         let stored = resolve_path(&abs);
         let recursive = stored.is_dir() || abs.is_dir();
-        self.insert(abs, stored, recursive);
+        self.insert(abs, stored, recursive, false);
         true
     }
 
@@ -134,13 +136,14 @@ impl Sandbox {
             return false;
         }
         let stored = resolve_path(&abs);
-        self.insert(abs, stored, false);
+        self.insert(abs, stored, false, true);
         true
     }
 
-    fn insert(&mut self, original: PathBuf, stored: PathBuf, recursive: bool) {
+    fn insert(&mut self, original: PathBuf, stored: PathBuf, recursive: bool, save_dest: bool) {
         if let Some(existing) = self.grants.iter_mut().find(|g| g.path == stored) {
             existing.recursive |= recursive;
+            existing.save_dest |= save_dest;
             return;
         }
         // startAccessing はダイアログ/ドロップの元パス。比較キーは canonicalize 後。
@@ -151,6 +154,7 @@ impl Sandbox {
         self.grants.push(Grant {
             path: stored,
             recursive,
+            save_dest,
             #[cfg(target_os = "macos")]
             _access: access,
         });
@@ -185,7 +189,7 @@ impl Sandbox {
         if self
             .grants
             .iter()
-            .any(|g| !g.recursive && is_split_sibling(&g.path, &resolved))
+            .any(|g| g.save_dest && is_split_sibling(&g.path, &resolved))
         {
             return Ok(resolved);
         }
@@ -221,6 +225,7 @@ impl Sandbox {
                 .map(|g| Grant {
                     path: g.path.clone(),
                     recursive: g.recursive,
+                    save_dest: g.save_dest,
                     #[cfg(target_os = "macos")]
                     _access: None,
                 })
@@ -740,6 +745,27 @@ mod tests {
         assert!(!sandbox.allows(&root));
         let z01 = root.join("out.z01");
         assert!(sandbox.resolve_save_file(&z01).is_ok());
+        assert!(!sandbox.allows(&z01));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dropped_file_does_not_unlock_split_siblings() {
+        let root = std::env::temp_dir().join(format!(
+            "winzip-jp-drop-sib-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let dropped = root.join("budget.xlsx");
+        fs::write(&dropped, b"x").unwrap();
+        let mut sandbox = Sandbox::new();
+        assert!(sandbox.grant(&dropped));
+        let z01 = root.join("budget.z01");
+        assert!(sandbox.resolve_save_file(&z01).is_err());
         assert!(!sandbox.allows(&z01));
         let _ = fs::remove_dir_all(&root);
     }
