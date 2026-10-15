@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { getApi } from "./api";
 import { COPY } from "./copy";
+import { defaultReplacements, isValidReplacement } from "./replacements";
 import type {
   ExtractReport,
   ListReport,
@@ -8,7 +9,6 @@ import type {
   NameEncoding,
   PlanDto,
   ProgressDto,
-  Unmappable,
   WriteReport,
 } from "./types";
 
@@ -18,6 +18,7 @@ export type Job = {
   kind: JobKind;
   progress: ProgressDto;
   dest: string | null;
+  epoch: number;
 };
 
 export type Sheet = "none" | "open" | "dismissed" | "confirmed";
@@ -32,6 +33,7 @@ export type AppState = {
   archivePath: string | null;
   encodingOverride: NameEncoding | null;
   job: Job | null;
+  epoch: number;
   error: string;
   setMode: (mode: Mode) => void;
   setProgress: (progress: ProgressDto) => void;
@@ -57,16 +59,6 @@ function errText(err: unknown): string {
 
 function firstZip(paths: string[]): string | undefined {
   return paths.find((p) => p.toLowerCase().endsWith(".zip")) ?? paths[0];
-}
-
-function defaultReplacements(issues: Unmappable[]): Record<string, string> {
-  const next: Record<string, string> = {};
-  for (const issue of issues) {
-    if (next[issue.relativePath] === undefined) {
-      next[issue.relativePath] = issue.suggested;
-    }
-  }
-  return next;
 }
 
 function destHint(plan: PlanDto | null, fallback: string): string {
@@ -121,52 +113,74 @@ const emptyWork = {
 };
 
 export const useAppStore = create<AppState>((set, get) => {
+  function bumpEpoch(): number {
+    const epoch = get().epoch + 1;
+    set({ epoch });
+    return epoch;
+  }
+
   async function runJob(
     kind: JobKind,
     pickDest: () => Promise<string | null>,
     run: (dest: string) => Promise<WriteReport | ExtractReport>,
     noDest: string,
   ): Promise<void> {
+    const epoch = bumpEpoch();
     set({
       error: "",
-      job: { kind, progress: startingProgress(), dest: null },
+      job: { kind, progress: startingProgress(), dest: null, epoch },
     });
     try {
       const dest = await pickDest();
+      if (get().epoch !== epoch) {
+        return;
+      }
       if (!dest) {
         set({ error: noDest, job: null });
         return;
       }
       const report = await run(dest);
+      if (get().epoch !== epoch) {
+        return;
+      }
       set({
-        job: { kind, dest: report.dest, progress: doneProgress(report.entriesWritten, report.bytesWritten) },
+        job: {
+          kind,
+          dest: report.dest,
+          progress: doneProgress(report.entriesWritten, report.bytesWritten),
+          epoch,
+        },
       });
     } catch (err) {
+      if (get().epoch !== epoch) {
+        return;
+      }
       set({ error: errText(err), job: null });
     }
   }
 
   return {
     mode: "create",
+    epoch: 0,
     ...emptyWork,
 
     setMode(mode) {
       if (jobInFlight(get().job)) {
         return;
       }
-      set({ mode, ...emptyWork });
+      set({ mode, ...emptyWork, epoch: get().epoch + 1 });
     },
 
     setProgress(progress) {
       const job = get().job;
-      if (!job) {
+      if (!job || job.epoch !== get().epoch) {
         return;
       }
       set({ job: { ...job, progress } });
     },
 
     resetWork() {
-      set({ ...emptyWork });
+      set({ ...emptyWork, epoch: get().epoch + 1 });
     },
 
     async ingestDropped(paths) {
@@ -178,11 +192,15 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ error: get().mode === "create" ? COPY.noFiles : COPY.noZip });
         return;
       }
+      const epoch = bumpEpoch();
       set({ dropped: usable, error: "", job: null });
       const api = getApi();
       if (get().mode === "create") {
         try {
           const plan = await api.planArchive(usable);
+          if (get().epoch !== epoch) {
+            return;
+          }
           const issues = plan.issues ?? [];
           set({
             plan,
@@ -192,6 +210,9 @@ export const useAppStore = create<AppState>((set, get) => {
             archivePath: null,
           });
         } catch (err) {
+          if (get().epoch !== epoch) {
+            return;
+          }
           set({ plan: null, sheet: "none", error: errText(err) });
         }
         return;
@@ -203,8 +224,14 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       try {
         const list = await api.listArchive(archive, get().encodingOverride);
+        if (get().epoch !== epoch) {
+          return;
+        }
         set({ list, plan: null, sheet: "none", archivePath: archive });
       } catch (err) {
+        if (get().epoch !== epoch) {
+          return;
+        }
         set({ list: null, error: errText(err) });
       }
     },
@@ -226,6 +253,7 @@ export const useAppStore = create<AppState>((set, get) => {
       set({
         replacements: { ...get().replacements, [relativePath]: suggested },
         sheet: "open",
+        error: isValidReplacement(suggested) ? "" : COPY.invalidReplacement,
       });
     },
 
@@ -237,11 +265,19 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!get().plan) {
         return;
       }
+      const values = Object.values(get().replacements);
+      if (values.some((value) => !isValidReplacement(value))) {
+        set({ error: COPY.invalidReplacement, sheet: "open" });
+        return;
+      }
       set({ sheet: "confirmed" });
       await get().createZip();
     },
 
     async createZip() {
+      if (jobInFlight(get().job)) {
+        return;
+      }
       const { dropped, plan, replacements, sheet } = get();
       if (dropped.length === 0) {
         set({ error: COPY.noFiles });
@@ -249,6 +285,11 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       if (plan && plan.issues.length > 0 && sheet !== "confirmed") {
         set({ sheet: "open", error: COPY.needConfirm });
+        return;
+      }
+      const values = Object.values(replacements);
+      if (values.some((value) => !isValidReplacement(value))) {
+        set({ error: COPY.invalidReplacement, sheet: "open" });
         return;
       }
       await runJob(
@@ -274,6 +315,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async extractZip() {
+      if (jobInFlight(get().job)) {
+        return;
+      }
       const archive = get().archivePath ?? firstZip(get().dropped);
       if (!archive) {
         set({ error: COPY.noZip });
@@ -295,8 +339,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async cancel() {
-      await getApi().cancelJob();
+      bumpEpoch();
       set({ job: null, error: COPY.cancelled });
+      await getApi().cancelJob();
     },
 
     closeJob() {

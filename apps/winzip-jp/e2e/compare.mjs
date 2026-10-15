@@ -41,6 +41,13 @@ function loadPng(path) {
 mkdirSync(artifacts, { recursive: true });
 mkdirSync(baselines, { recursive: true });
 
+const shouldCompare =
+  process.env.CI === "true" || process.env.COMPARE === "1" || process.env.UPDATE_BASELINES === "1";
+if (!shouldCompare) {
+  console.log("pixelmatch は CI / COMPARE=1 のときだけ実行します（ローカル Linux はフォントが違います）");
+  process.exit(0);
+}
+
 let failed = 0;
 let missing = 0;
 for (const id of ids) {

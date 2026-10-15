@@ -1,5 +1,6 @@
 import { Text, UnstyledButton } from "@mantine/core";
 import { COPY } from "../copy";
+import { replacementFieldId } from "../replacements";
 import type { Unmappable, UnmappableKind } from "../types";
 
 function kindLabel(kind: UnmappableKind): string {
@@ -54,11 +55,11 @@ export function UnmappableSheet({
                   <span className="sheet-kind">{kindLabel(issue.kind)}</span>
                 </td>
                 <td>
-                  <label className="sr-only" htmlFor={`repl-${issue.relativePath}`}>
+                  <label className="sr-only" htmlFor={replacementFieldId(issue.relativePath)}>
                     {COPY.colReplacement}
                   </label>
                   <input
-                    id={`repl-${issue.relativePath}`}
+                    id={replacementFieldId(issue.relativePath)}
                     className="sheet-input"
                     value={replacements[issue.relativePath] ?? issue.suggested}
                     onChange={(event) => onChange(issue.relativePath, event.target.value)}

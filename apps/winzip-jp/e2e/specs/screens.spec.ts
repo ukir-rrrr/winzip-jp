@@ -51,7 +51,8 @@ describe("画面 S1–S8", () => {
     const text = await sheet.getText();
     expect(text).toContain("髙.png");
     expect(text).toContain("髙");
-    await expect($("[data-testid='repl-髙.png']")).toHaveValue("高");
+    await expect($("[data-testid='repl-髙.png']")).toHaveValue("高.png");
+    await expect($("[data-testid='repl-﨑.txt']")).toHaveValue("崎.txt");
     await shot("s3");
   });
 

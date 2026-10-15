@@ -6,10 +6,11 @@ export function hasTauri(): boolean {
 }
 
 function jaErr(fallback: string, err: unknown): Error {
-  if (err instanceof Error && err.message) {
-    return err;
+  const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  if (msg && /[\u3040-\u30ff\u4e00-\u9fff]/.test(msg)) {
+    return new Error(msg);
   }
-  return new Error(typeof err === "string" && err ? err : fallback);
+  return new Error(fallback);
 }
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -19,6 +20,9 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 const tauriApi: ZipApi = {
   async planArchive(paths, destNameHint) {
+    if (!hasTauri()) {
+      throw new Error(COPY.browserCreate);
+    }
     try {
       return await invoke<PlanDto>("plan_archive", { paths, destNameHint: destNameHint ?? null });
     } catch (err) {
@@ -26,6 +30,9 @@ const tauriApi: ZipApi = {
     }
   },
   async createArchive(req, dest) {
+    if (!hasTauri()) {
+      throw new Error(COPY.browserCreate);
+    }
     try {
       return await invoke<WriteReport>("create_archive", { req, dest });
     } catch (err) {
@@ -33,6 +40,9 @@ const tauriApi: ZipApi = {
     }
   },
   async listArchive(path, encoding) {
+    if (!hasTauri()) {
+      throw new Error(COPY.browserList);
+    }
     try {
       return await invoke<ListReport>("list_archive", { path, encoding });
     } catch (err) {
@@ -40,6 +50,9 @@ const tauriApi: ZipApi = {
     }
   },
   async extractArchive(req) {
+    if (!hasTauri()) {
+      throw new Error(COPY.browserExtract);
+    }
     try {
       return await invoke<ExtractReport>("extract_archive", { req });
     } catch (err) {

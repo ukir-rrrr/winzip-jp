@@ -37,9 +37,17 @@ export default function App() {
       unlistenProgress = await listen<ProgressDto>("zip://progress", (event) => {
         useAppStore.getState().setProgress(event.payload);
       });
+      if (cancelled) {
+        unlistenProgress();
+        return;
+      }
       unlistenDrop = await listen<string[]>("zip://dropped", (event) => {
         void useAppStore.getState().ingestDropped(event.payload);
       });
+      if (cancelled) {
+        unlistenProgress();
+        unlistenDrop();
+      }
     })();
     return () => {
       cancelled = true;
@@ -116,7 +124,7 @@ export default function App() {
             <CreateScreen
               plan={plan}
               error={error}
-              canCreate={sheet !== "open" && sheet !== "dismissed"}
+              canCreate={sheet !== "open"}
               onPick={() => void useAppStore.getState().pickInputs()}
               onCreate={() => void useAppStore.getState().createZip()}
               onReset={() => useAppStore.getState().resetWork()}

@@ -146,6 +146,30 @@ fn fs_scope_does_not_include_home() {
 }
 
 #[test]
+fn capabilities_are_pinned_to_default() {
+    for name in ["tauri.conf.json", "tauri.appstore.conf.json", "tauri.e2e.conf.json"] {
+        let json: serde_json::Value =
+            serde_json::from_str(&read(&tauri_dir().join(name))).expect(name);
+        assert_eq!(
+            json["app"]["security"]["capabilities"],
+            serde_json::json!(["default"]),
+            "{name} の capabilities が default に固定されていない"
+        );
+    }
+    assert!(
+        !tauri_dir().join("capabilities/e2e.json").exists(),
+        "e2e.json は全ビルドに載るので置かない"
+    );
+    let names: Vec<String> = fs::read_dir(tauri_dir().join("capabilities"))
+        .expect("capabilities")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["default.json".to_string()]);
+}
+
+#[test]
 fn cargo_does_not_depend_on_persisted_scope() {
     let toml = read(&tauri_dir().join("Cargo.toml"));
     assert!(!toml.contains("tauri-plugin-persisted-scope"));

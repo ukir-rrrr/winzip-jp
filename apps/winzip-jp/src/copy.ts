@@ -37,6 +37,7 @@ export const COPY = {
   noDest: "保存先が選ばれていません",
   noExtractDest: "展開先が選ばれていません",
   needConfirm: "Windows で使えない文字の置き換えを確定してください",
+  invalidReplacement: "置き換え後の名前が使えません",
   browserCreate: "この画面では作成できません",
   browserList: "この画面では一覧できません",
   browserExtract: "この画面では解凍できません",
