@@ -33,9 +33,11 @@ export function normalizeReplacements(map: Record<string, string>): Record<strin
   return next;
 }
 
+const WIN_FORBIDDEN = /[:*?"<>|\x00-\x1f]/;
+
 export function isValidReplacement(value: string): boolean {
   const trimmed = normalizeReplacement(value);
-  if (!trimmed || trimmed.includes("\\") || trimmed.includes("\0")) {
+  if (!trimmed || trimmed.includes("\\") || WIN_FORBIDDEN.test(trimmed)) {
     return false;
   }
   // zipcore のディレクトリ名は末尾 `/`。印としてだけ許し、成分検査の前に剥がす。
@@ -43,7 +45,15 @@ export function isValidReplacement(value: string): boolean {
   if (!body || body.startsWith("/")) {
     return false;
   }
-  return body.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+  return body.split("/").every((part) => {
+    if (!part || part === "." || part === "..") {
+      return false;
+    }
+    if (WIN_FORBIDDEN.test(part)) {
+      return false;
+    }
+    return !part.endsWith(".") && !part.endsWith(" ");
+  });
 }
 
 export function replacementRows(issues: Unmappable[]): Unmappable[] {

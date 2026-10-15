@@ -195,6 +195,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     resetWork() {
+      if (jobInFlight(get().job)) {
+        return;
+      }
       begin({ ...emptyWork });
     },
 

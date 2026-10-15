@@ -1,5 +1,6 @@
 //! ダイアログを使わずパス直指定で create / list / extract を通す。
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,7 +11,9 @@ use winzip_jp_lib::{
     create_archive_direct, extract_archive_direct, list_archive_direct, plan_archive_direct,
     CreateDto, ExtractDto, Sandbox, PROGRESS_EVENT,
 };
-use zipcore::{inspect_zip_headers, NameEncoding, Progress, ProgressPhase, EFS_UTF8_BIT};
+use zipcore::{
+    encode_entry_name, inspect_zip_headers, NameEncoding, Progress, ProgressPhase, EFS_UTF8_BIT,
+};
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -146,6 +149,37 @@ fn plan_archive_lists_unmappable_taka() {
     );
     assert!(issues[0].get("relativePath").is_some(), "{json}");
     assert!(issues[0].get("relative_path").is_none(), "{json}");
+}
+
+#[test]
+fn create_archive_writes_replaced_name_as_cp932() {
+    let root = unique_dir("repl-bytes");
+    let src = root.join("髙.png");
+    fs::write(&src, b"img").unwrap();
+    let dest = root.join("out.zip");
+    let sandbox = grant(&[&root, &src, &dest]);
+    let cancel = AtomicBool::new(false);
+    let mut replacements = BTreeMap::new();
+    replacements.insert("髙.png".into(), "高.png".into());
+    create_archive_direct(
+        &sandbox,
+        &CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements,
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &cancel,
+    )
+    .expect("create");
+    let headers = inspect_zip_headers(&dest).unwrap();
+    let entry = headers
+        .iter()
+        .find(|e| !e.name_raw.ends_with(b"/"))
+        .expect("file entry");
+    assert_eq!(hex(&entry.name_raw), hex(&encode_entry_name("高.png").cp932));
+    assert_eq!(entry.gpbf & EFS_UTF8_BIT, 0);
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]

@@ -226,6 +226,21 @@ describe("世代トークン", () => {
     void create;
   });
 
+  it("ジョブ中のやり直すは無視する", async () => {
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      pickSaveZip: () => new Promise(() => undefined),
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    const create = useAppStore.getState().createZip();
+    useAppStore.getState().resetWork();
+    assert.ok(useAppStore.getState().job);
+    assert.deepEqual(useAppStore.getState().dropped, ["/tmp/e2e/in"]);
+    void create;
+  });
+
   it("ジョブ中のドロップは無視する", async () => {
     installApi({
       async planArchive() {

@@ -77,7 +77,7 @@ const tauriApi: ZipApi = {
     try {
       return await invoke<PlanDto>("plan_archive", { paths, destNameHint: destNameHint ?? null });
     } catch (err) {
-      throw jaErr(COPY.browserCreate, err);
+      throw jaErr(COPY.failed, err);
     }
   },
   async createArchive(req, dest) {
@@ -87,7 +87,7 @@ const tauriApi: ZipApi = {
     try {
       return await invoke<WriteReport>("create_archive", { req, dest });
     } catch (err) {
-      throw jaErr(COPY.browserCreate, err);
+      throw jaErr(COPY.failed, err);
     }
   },
   async listArchive(path, encoding) {
@@ -97,7 +97,7 @@ const tauriApi: ZipApi = {
     try {
       return await invoke<ListReport>("list_archive", { path, encoding });
     } catch (err) {
-      throw jaErr(COPY.browserList, err);
+      throw jaErr(COPY.failed, err);
     }
   },
   async extractArchive(req) {
@@ -107,7 +107,7 @@ const tauriApi: ZipApi = {
     try {
       return await invoke<ExtractReport>("extract_archive", { req });
     } catch (err) {
-      throw jaErr(COPY.browserExtract, err);
+      throw jaErr(COPY.failed, err);
     }
   },
   async cancelJob() {
@@ -123,7 +123,7 @@ const tauriApi: ZipApi = {
     try {
       return await invoke<string[]>("pick_files");
     } catch (err) {
-      throw jaErr(COPY.noFiles, err);
+      throw jaErr(COPY.failed, err);
     }
   },
   async pickSaveZip(defaultName) {
@@ -133,7 +133,7 @@ const tauriApi: ZipApi = {
     try {
       return await invoke<string | null>("pick_save_zip", { defaultName });
     } catch (err) {
-      throw jaErr(COPY.noDest, err);
+      throw jaErr(COPY.failed, err);
     }
   },
   async pickExtractDir() {
@@ -143,7 +143,7 @@ const tauriApi: ZipApi = {
     try {
       return await invoke<string | null>("pick_extract_dir");
     } catch (err) {
-      throw jaErr(COPY.noExtractDest, err);
+      throw jaErr(COPY.failed, err);
     }
   },
 };

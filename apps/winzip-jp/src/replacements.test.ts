@@ -67,6 +67,14 @@ describe("isValidReplacement", () => {
     assert.equal(isValidReplacement(".."), false);
     assert.equal(isValidReplacement("a/../b"), false);
     assert.equal(isValidReplacement("a\\b"), false);
+    assert.equal(isValidReplacement("高:.png"), false);
+    assert.equal(isValidReplacement("高*.png"), false);
+    assert.equal(isValidReplacement("高?.png"), false);
+    assert.equal(isValidReplacement("高\".png"), false);
+    assert.equal(isValidReplacement("高<.png"), false);
+    assert.equal(isValidReplacement("高>.png"), false);
+    assert.equal(isValidReplacement("高|.png"), false);
+    assert.equal(isValidReplacement("高.png."), false);
   });
 
   it("accepts a relative full name", () => {

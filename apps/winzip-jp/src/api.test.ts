@@ -14,7 +14,7 @@ describe("jaErr", () => {
   it("drops English and mixed messages that only contain a Japanese character", () => {
     assert.equal(isKnownJaMessage("Failed to invoke 作成"), false);
     assert.equal(isKnownJaMessage("TypeError: Cannot read properties of undefined"), false);
-    assert.equal(jaErr(COPY.noDest, new Error("os error 2: No such file")).message, COPY.noDest);
-    assert.equal(jaErr(COPY.noFiles, new Error("dialog failed 作成")).message, COPY.noFiles);
+    assert.equal(jaErr(COPY.failed, new Error("os error 2: No such file")).message, COPY.failed);
+    assert.equal(jaErr(COPY.failed, new Error("dialog failed 作成")).message, COPY.failed);
   });
 });
