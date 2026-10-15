@@ -347,33 +347,178 @@ fn first_progress_is_starting() {
 }
 
 #[test]
-fn password_and_split_are_rejected() {
+fn empty_password_is_rejected() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("a.txt");
     write_file(&src, b"a");
-    let base = WriteRequest {
+    let req = WriteRequest {
         inputs: vec![InputItem {
-            abs_path: src.clone(),
+            abs_path: src,
+            as_dir: false,
+        }],
+        dest: tmp.path().join("out.zip"),
+        password: Some(SecretString::new("")),
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    let err = write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_err();
+    assert!(matches!(err, ZipcoreError::EmptyPassword));
+    assert_eq!(err.to_string(), "パスワードを入力してください");
+}
+
+#[test]
+fn split_is_still_rejected() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("a.txt");
+    write_file(&src, b"a");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src,
             as_dir: false,
         }],
         dest: tmp.path().join("out.zip"),
         password: None,
         aes: AesMode::Aes256,
+        split_bytes: Some(1024),
+        replacements: BTreeMap::new(),
+    };
+    assert!(matches!(
+        write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_err(),
+        ZipcoreError::SplitNotImplemented
+    ));
+}
+
+#[test]
+fn aes_zip_sets_encrypt_bit_and_9901_and_keeps_cp932_names() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("が.txt"), b"ga");
+    write_file(&src.join("hello.txt"), b"hi");
+    let dest = tmp.path().join("aes.zip");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src,
+            as_dir: true,
+        }],
+        dest: dest.clone(),
+        password: Some(SecretString::new("secret")),
+        aes: AesMode::Aes256,
         split_bytes: None,
         replacements: BTreeMap::new(),
     };
-    let mut pw = base.clone();
-    pw.password = Some(SecretString::new("secret"));
-    assert!(matches!(
-        write_zip(pw, |_| {}, &AtomicBool::new(false)).unwrap_err(),
-        ZipcoreError::AesNotImplemented
-    ));
-    let mut split = base;
-    split.split_bytes = Some(1024);
-    assert!(matches!(
-        write_zip(split, |_| {}, &AtomicBool::new(false)).unwrap_err(),
-        ZipcoreError::SplitNotImplemented
-    ));
+    write_zip(req, |_| {}, &AtomicBool::new(false)).expect("aes write");
+    let entries = inspect_zip_headers(&dest).unwrap();
+    let files: Vec<_> = entries
+        .iter()
+        .filter(|e| !e.name_raw.ends_with(b"/"))
+        .collect();
+    assert!(!files.is_empty());
+    for e in &files {
+        assert_eq!(e.gpbf & EFS_UTF8_BIT, 0);
+        assert_eq!(e.gpbf & 1, 1);
+        assert_eq!(e.method, 99);
+        assert!(e.has_aes_extra());
+        assert!(!e.has_unicode_path_extra());
+        assert_eq!(e.host_os, 0);
+        assert_eq!(e.crc, 0);
+    }
+    let ga = entries
+        .iter()
+        .find(|e| e.name_raw == encode_entry_name("src/が.txt").cp932)
+        .unwrap();
+    assert_eq!(ga.name_raw, encode_entry_name("src/が.txt").cp932);
+}
+
+#[test]
+fn passwordless_zip_matches_aes_zip_names_and_bit11() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("漢字.txt"), b"kanji");
+    let plain = tmp.path().join("plain.zip");
+    let aes = tmp.path().join("aes.zip");
+    let base = || WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src.clone(),
+            as_dir: true,
+        }],
+        dest: PathBuf::new(),
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    let mut plain_req = base();
+    plain_req.dest = plain.clone();
+    write_zip(plain_req, |_| {}, &AtomicBool::new(false)).unwrap();
+    let mut aes_req = base();
+    aes_req.dest = aes.clone();
+    aes_req.password = Some(SecretString::new("secret"));
+    write_zip(aes_req, |_| {}, &AtomicBool::new(false)).unwrap();
+
+    let plain_entries = inspect_zip_headers(&plain).unwrap();
+    let aes_entries = inspect_zip_headers(&aes).unwrap();
+    let plain_names: Vec<_> = plain_entries.iter().map(|e| e.name_raw.clone()).collect();
+    let aes_names: Vec<_> = aes_entries.iter().map(|e| e.name_raw.clone()).collect();
+    assert_eq!(plain_names, aes_names);
+    for e in &plain_entries {
+        assert_eq!(e.gpbf & EFS_UTF8_BIT, 0);
+        assert_eq!(e.gpbf & 1, 0);
+    }
+    for e in aes_entries.iter().filter(|e| !e.name_raw.ends_with(b"/")) {
+        assert_eq!(e.gpbf & EFS_UTF8_BIT, 0);
+        assert_eq!(e.gpbf & 1, 1);
+    }
+}
+
+#[test]
+fn japanese_password_is_utf8_bytes() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("a.txt");
+    write_file(&src, b"payload");
+    let dest = tmp.path().join("jp.zip");
+    let password = SecretString::new("パスワード");
+    assert_eq!(password.expose_bytes(), "パスワード".as_bytes());
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src,
+            as_dir: false,
+        }],
+        dest: dest.clone(),
+        password: Some(password),
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap();
+    let dest_out = tmp.path().join("out");
+    fs::create_dir_all(&dest_out).unwrap();
+    let missing = zipcore::extract_zip(
+        zipcore::ExtractRequest {
+            archive: dest.clone(),
+            dest: dest_out.clone(),
+            encoding: None,
+            overwrite: false,
+            password: None,
+        },
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(matches!(missing, ZipcoreError::Encrypted { .. }));
+    zipcore::extract_zip(
+        zipcore::ExtractRequest {
+            archive: dest,
+            dest: dest_out.clone(),
+            encoding: None,
+            overwrite: false,
+            password: Some(SecretString::new("パスワード")),
+        },
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .expect("utf-8 password decrypt");
+    assert_eq!(fs::read(dest_out.join("a.txt")).unwrap(), b"payload");
 }
 
 #[test]

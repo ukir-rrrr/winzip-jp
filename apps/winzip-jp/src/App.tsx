@@ -21,6 +21,8 @@ export default function App() {
   const job = useAppStore((s) => s.job);
   const confirming = useAppStore((s) => s.confirming);
   const encodingOverride = useAppStore((s) => s.encodingOverride);
+  const aesEnabled = useAppStore((s) => s.aesEnabled);
+  const password = useAppStore((s) => s.password);
   const isCreate = mode === "create";
   const modalOpen = sheet === "open" || job !== null;
 
@@ -77,6 +79,19 @@ export default function App() {
         <Title order={1} className="app-title">
           {COPY.appTitle}
         </Title>
+        {isCreate ? (
+          <UnstyledButton
+            type="button"
+            role="switch"
+            aria-checked={aesEnabled}
+            aria-label={COPY.aesOption}
+            className={aesEnabled ? "aes-switch is-on" : "aes-switch"}
+            data-testid="aes-toggle"
+            onClick={() => useAppStore.getState().setAesEnabled(!aesEnabled)}
+          >
+            {COPY.aesSwitch}
+          </UnstyledButton>
+        ) : null}
         <div className="mode-switch" role="tablist" aria-label={COPY.mode}>
           <UnstyledButton
             type="button"
@@ -153,6 +168,26 @@ export default function App() {
               onConfirm={() => void useAppStore.getState().confirmAndCreate()}
               onDismiss={() => useAppStore.getState().dismissSheet()}
             />
+          ) : null}
+          {isCreate && aesEnabled && sheet !== "open" && !job ? (
+            <div className="aes-banner" data-testid="aes-panel">
+              <p className="aes-warning" data-testid="aes-warning">
+                {COPY.aesExplorerWarning}
+              </p>
+              <p className="aes-note">{COPY.aesUtf8Note}</p>
+              <label className="aes-password-label" htmlFor="aes-password">
+                {COPY.aesOption}
+                <input
+                  id="aes-password"
+                  className="sheet-input aes-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  data-testid="aes-password"
+                  onChange={(event) => useAppStore.getState().setPassword(event.target.value)}
+                />
+              </label>
+            </div>
           ) : null}
           {job ? (
             <ProgressOverlay

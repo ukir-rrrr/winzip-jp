@@ -8,7 +8,22 @@ import type { WriteReport } from "./types";
 
 afterEach(() => {
   resetApi();
-  useAppStore.getState().setMode("create");
+  useAppStore.setState({
+    mode: "create",
+    dropped: [],
+    plan: null,
+    replacements: {},
+    sheet: "none",
+    list: null,
+    archivePath: null,
+    encodingOverride: null,
+    aesEnabled: false,
+    password: "",
+    job: null,
+    confirming: false,
+    error: "",
+    epoch: useAppStore.getState().epoch + 1,
+  });
 });
 
 describe("replacements 契約", () => {
@@ -408,6 +423,66 @@ describe("世代トークン", () => {
     assert.deepEqual(useAppStore.getState().dropped, ["/tmp/e2e/in"]);
     assert.ok(useAppStore.getState().job);
     void create;
+  });
+});
+
+describe("AES オプション", () => {
+  it("既定はオフでパスワードを送らない", async () => {
+    let sent: string | null | undefined = "unset";
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        sent = req.password ?? null;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    assert.equal(useAppStore.getState().aesEnabled, false);
+    await useAppStore.getState().createZip();
+    assert.equal(sent, null);
+  });
+
+  it("空パスワードでは作成しない", async () => {
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setAesEnabled(true);
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().error, COPY.emptyPassword);
+    assert.equal(useAppStore.getState().job, null);
+  });
+
+  it("オンなら UTF-8 パスワードを渡す", async () => {
+    let sent: string | null | undefined;
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        sent = req.password ?? null;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setAesEnabled(true);
+    useAppStore.getState().setPassword("パスワード");
+    await useAppStore.getState().createZip();
+    assert.equal(sent, "パスワード");
+    assert.equal(useAppStore.getState().password, "");
   });
 });
 

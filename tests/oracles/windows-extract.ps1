@@ -73,9 +73,18 @@ if ($LASTEXITCODE -ne 0) {
 
 $SevenOut = Join-Path $WorkDir '7z'
 New-Item -ItemType Directory -Force -Path $SevenOut | Out-Null
+$expectObj = Get-Content -Raw -Encoding UTF8 -LiteralPath $ExpectPath | ConvertFrom-Json
+$password = $null
+if ($null -ne $expectObj.password -and "$($expectObj.password)" -ne '') {
+    $password = [string]$expectObj.password
+}
 Write-Host '7z x -mcp=932'
 $outSwitch = '-o' + $SevenOut
-& "$Seven" x -y '-mcp=932' $outSwitch "$ZipPath"
+if ($password) {
+    & "$Seven" x -y '-mcp=932' ("-p" + $password) $outSwitch "$ZipPath"
+} else {
+    & "$Seven" x -y '-mcp=932' $outSwitch "$ZipPath"
+}
 if ($LASTEXITCODE -ne 0) {
     throw '7-Zip extract failed'
 }

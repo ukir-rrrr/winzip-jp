@@ -3,11 +3,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::ZipcoreError;
 
-/// パスワード。Debug に中身を出さない。
-#[derive(Clone)]
+/// パスワード。Debug に中身を出さない。破棄時にゼロ化する。
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SecretString(String);
 
 impl SecretString {
@@ -17,6 +18,14 @@ impl SecretString {
 
     pub fn expose(&self) -> &str {
         &self.0
+    }
+
+    pub fn expose_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
@@ -43,6 +52,19 @@ pub struct Progress {
     pub entries_total: u32,
     pub bytes_done: u64,
     pub bytes_total: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zeroize::Zeroize;
+
+    #[test]
+    fn secret_string_zeroizes() {
+        let mut s = SecretString::new("hunter2");
+        s.zeroize();
+        assert!(s.expose().is_empty() || s.expose().bytes().all(|b| b == 0));
+    }
 }
 
 pub fn check_cancel(cancel: &AtomicBool) -> Result<(), ZipcoreError> {

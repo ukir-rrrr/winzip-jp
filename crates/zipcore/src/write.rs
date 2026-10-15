@@ -1,4 +1,4 @@
-//! ZIP 作成（非暗号・非分割）。ファイル名は `encode_entry_name` の CP932 バイトのみ。
+//! ZIP 作成（任意 AES-256 AE-2、非分割）。ファイル名は `encode_entry_name` の CP932 バイトのみ。
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
@@ -11,13 +11,16 @@ use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
+use crate::aeswrite::{
+    aes_extra_field, Aes256Writer, GPBF_ENCRYPT, METHOD_AES, VERSION_NEEDED_AES,
+};
 use crate::encoding::{encode_entry_name, is_junk, Unmappable};
 use crate::error::ZipcoreError;
 use crate::fsutil::{atomic_replace, path_eq, resolve_existing, resolve_path, stays_under};
 use crate::job::check_cancel;
 use crate::pkzip::{
     inspect_zip, patch_local_sizes, write_central_header, write_eocd, write_local_header,
-    CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED,
+    CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED, VERSION_NEEDED,
 };
 
 pub use crate::job::{Progress, ProgressPhase, SecretString};
@@ -108,8 +111,10 @@ pub fn write_zip(
         bytes_total: 0,
     });
     check_cancel(cancel)?;
-    if req.password.is_some() {
-        return Err(ZipcoreError::AesNotImplemented);
+    if let Some(ref password) = req.password {
+        if password.is_empty() {
+            return Err(ZipcoreError::EmptyPassword);
+        }
     }
     let _ = req.aes;
     if req.split_bytes.is_some() {
@@ -134,7 +139,8 @@ pub fn write_zip(
     }
 
     let dest = req.dest.clone();
-    let report = write_plan_to_path(&plan, &dest, &mut progress, cancel)?;
+    let password = req.password.as_ref().map(SecretString::expose_bytes);
+    let report = write_plan_to_path(&plan, &dest, password, &mut progress, cancel)?;
     progress(Progress {
         phase: ProgressPhase::Done,
         current_entry: None,
@@ -149,11 +155,12 @@ pub fn write_zip(
 fn write_plan_to_path(
     plan: &Plan,
     dest: &Path,
+    password: Option<&[u8]>,
     progress: &mut impl FnMut(Progress),
     cancel: &AtomicBool,
 ) -> Result<WriteReport, ZipcoreError> {
     let partial = partial_path(dest);
-    let result = write_plan_to_partial(plan, dest, &partial, progress, cancel);
+    let result = write_plan_to_partial(plan, dest, &partial, password, progress, cancel);
     match result {
         Ok(report) => {
             if let Err(e) = replace_file(&partial, dest) {
@@ -173,6 +180,7 @@ fn write_plan_to_partial(
     plan: &Plan,
     dest: &Path,
     partial: &Path,
+    password: Option<&[u8]>,
     progress: &mut impl FnMut(Progress),
     cancel: &AtomicBool,
 ) -> Result<WriteReport, ZipcoreError> {
@@ -196,6 +204,7 @@ fn write_plan_to_partial(
         let rec = write_one_entry(
             &mut out,
             entry,
+            password,
             cancel,
             progress,
             Progress {
@@ -256,6 +265,7 @@ fn write_plan_to_partial(
 fn write_one_entry(
     out: &mut File,
     entry: &PlannedEntry,
+    password: Option<&[u8]>,
     cancel: &AtomicBool,
     progress: &mut impl FnMut(Progress),
     snap: Progress,
@@ -287,6 +297,7 @@ fn write_one_entry(
         write_local_header(
             out,
             &entry.name_raw,
+            &[],
             METHOD_STORED,
             GPBF_PLAIN,
             dos_time,
@@ -294,9 +305,11 @@ fn write_one_entry(
             0,
             0,
             0,
+            VERSION_NEEDED,
         )?;
         return Ok(CentralRecord {
             name: entry.name_raw.clone(),
+            extra: Vec::new(),
             method: METHOD_STORED,
             gpbf: GPBF_PLAIN,
             crc: 0,
@@ -305,47 +318,72 @@ fn write_one_entry(
             local_offset: local_offset as u32,
             dos_time,
             dos_date,
+            version_needed: VERSION_NEEDED,
             is_dir: true,
         });
     }
 
+    let encrypt = password.is_some();
+    let extra = if encrypt {
+        aes_extra_field(METHOD_DEFLATE)
+    } else {
+        Vec::new()
+    };
+    let (method, gpbf, version_needed) = if encrypt {
+        (METHOD_AES, GPBF_ENCRYPT, VERSION_NEEDED_AES)
+    } else {
+        (METHOD_DEFLATE, GPBF_PLAIN, VERSION_NEEDED)
+    };
+
     write_local_header(
         out,
         &entry.name_raw,
-        METHOD_DEFLATE,
-        GPBF_PLAIN,
+        &extra,
+        method,
+        gpbf,
         dos_time,
         dos_date,
         0,
         0,
         0,
+        version_needed,
     )?;
     let data_start = out.stream_position()?;
     let mut hasher = crc32fast::Hasher::new();
     let mut uncompressed = 0u64;
     {
         let mut src = io::BufReader::new(File::open(&entry.source)?);
-        let mut encoder = DeflateEncoder::new(&mut *out, Compression::new(DEFLATE_LEVEL));
-        let mut buf = [0u8; COPY_BUF];
-        loop {
-            check_cancel(cancel)?;
-            let n = src.read(&mut buf)?;
-            if n == 0 {
-                break;
+        let mut copy_plain = |sink: &mut dyn Write| -> Result<(), ZipcoreError> {
+            let mut encoder = DeflateEncoder::new(sink, Compression::new(DEFLATE_LEVEL));
+            let mut buf = [0u8; COPY_BUF];
+            loop {
+                check_cancel(cancel)?;
+                let n = src.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
+                uncompressed += n as u64;
+                if uncompressed > u32::MAX as u64 {
+                    return Err(ZipcoreError::Zip64Required {
+                        reason: format!("{} が 4 GiB 以上です", entry.relative_path),
+                    });
+                }
+                encoder.write_all(&buf[..n])?;
+                let mut p = snap.clone();
+                p.bytes_done = snap.bytes_done.saturating_add(uncompressed);
+                progress(p);
             }
-            hasher.update(&buf[..n]);
-            uncompressed += n as u64;
-            if uncompressed > u32::MAX as u64 {
-                return Err(ZipcoreError::Zip64Required {
-                    reason: format!("{} が 4 GiB 以上です", entry.relative_path),
-                });
-            }
-            encoder.write_all(&buf[..n])?;
-            let mut p = snap.clone();
-            p.bytes_done = snap.bytes_done.saturating_add(uncompressed);
-            progress(p);
+            encoder.finish()?;
+            Ok(())
+        };
+        if let Some(password) = password {
+            let mut aes = Aes256Writer::new(&mut *out, password)?;
+            copy_plain(&mut aes)?;
+            aes.finish()?;
+        } else {
+            copy_plain(&mut *out)?;
         }
-        encoder.finish()?;
     }
     let data_end = out.stream_position()?;
     let compressed = data_end - data_start;
@@ -354,7 +392,7 @@ fn write_one_entry(
             reason: format!("{} の圧縮後サイズが 4 GiB 以上です", entry.relative_path),
         });
     }
-    let crc = hasher.finalize();
+    let crc = if encrypt { 0 } else { hasher.finalize() };
     patch_local_sizes(
         out,
         local_offset,
@@ -366,14 +404,16 @@ fn write_one_entry(
 
     Ok(CentralRecord {
         name: entry.name_raw.clone(),
-        method: METHOD_DEFLATE,
-        gpbf: GPBF_PLAIN,
+        extra,
+        method,
+        gpbf,
         crc,
         compressed: compressed as u32,
         uncompressed: uncompressed as u32,
         local_offset: local_offset as u32,
         dos_time,
         dos_date,
+        version_needed,
         is_dir: false,
     })
 }

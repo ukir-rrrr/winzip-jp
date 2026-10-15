@@ -23,6 +23,7 @@ SIG_EOCD = 0x06054B50
 EFS_UTF8_BIT = 0x0800
 ENCRYPT_BIT = 0x0001
 UNICODE_PATH_EXTRA_ID = 0x7075
+AES_EXTRA_ID = 0x9901
 
 
 def _u16(b: bytes, o: int) -> int:
@@ -112,6 +113,8 @@ def inspect(data: bytes) -> list[dict]:
                 "crc": crc,
                 "has_7075": extra_has_id(extra_local, UNICODE_PATH_EXTRA_ID)
                 or extra_has_id(extra_central, UNICODE_PATH_EXTRA_ID),
+                "has_9901": extra_has_id(extra_local, AES_EXTRA_ID)
+                and extra_has_id(extra_central, AES_EXTRA_ID),
                 "extra_local_len": len(extra_local),
                 "extra_central_len": len(extra_central),
             }
@@ -132,17 +135,26 @@ def compare(entries: list[dict], expected: dict) -> list[str]:
     got = {(e["name_hex"], e["gpbf"], e["method"]) for e in entries}
     if got != want:
         errors.append(f"entry set mismatch\n  got:  {sorted(got)}\n  want: {sorted(want)}")
+    want_by_hex = {norm_hex(e["name_hex"]): e for e in expected["entries"]}
     for e in entries:
         if e["gpbf"] & EFS_UTF8_BIT:
             errors.append(f"bit 11 set on {e['name_hex']}")
-        if e["gpbf"] & ENCRYPT_BIT:
-            errors.append(f"bit 0 set on {e['name_hex']}")
         if e["host_os"] != 0:
             errors.append(f"host OS {e['host_os']} != 0 on {e['name_hex']}")
         if e["has_7075"]:
             errors.append(f"0x7075 extra present on {e['name_hex']}")
-        if e["extra_local_len"] or e["extra_central_len"]:
-            errors.append(f"non-empty extra on {e['name_hex']}")
+        expect_row = want_by_hex.get(e["name_hex"])
+        expect_encrypt = bool(expect_row and int(expect_row["gpbf"]) & ENCRYPT_BIT)
+        if expect_encrypt:
+            if not (e["gpbf"] & ENCRYPT_BIT):
+                errors.append(f"bit 0 missing on AES entry {e['name_hex']}")
+            if not e["has_9901"]:
+                errors.append(f"0x9901 extra missing on {e['name_hex']}")
+        else:
+            if e["gpbf"] & ENCRYPT_BIT:
+                errors.append(f"bit 0 set on {e['name_hex']}")
+            if e["extra_local_len"] or e["extra_central_len"]:
+                errors.append(f"non-empty extra on {e['name_hex']}")
     for e in expected["entries"]:
         if int(e["gpbf"]) & EFS_UTF8_BIT:
             errors.append(f"expected.json gpbf has bit 11: {e['name_hex']}")

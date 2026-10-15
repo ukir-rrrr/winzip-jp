@@ -67,9 +67,10 @@ fn create_list_extract_with_direct_paths() {
     let cancel = AtomicBool::new(false);
     let report = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![input.to_string_lossy().into_owned()],
             replacements: Default::default(),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -145,8 +146,8 @@ fn plan_archive_lists_unmappable_taka() {
     let src = workspace_root().join("tests/golden/04-replacements/src");
     let mut sandbox = Sandbox::new();
     sandbox.grant(&src);
-    let plan = plan_archive_direct(&sandbox, &[src.to_string_lossy().into_owned()], None)
-        .expect("plan");
+    let plan =
+        plan_archive_direct(&sandbox, &[src.to_string_lossy().into_owned()], None).expect("plan");
     let json = serde_json::to_value(&plan).expect("plan json");
     let issues = json["issues"].as_array().expect("issues");
     assert!(
@@ -154,7 +155,9 @@ fn plan_archive_lists_unmappable_taka() {
             issue["relativePath"]
                 .as_str()
                 .is_some_and(|p| p.contains('髙'))
-                && issue["suggested"].as_str().is_some_and(|s| s.contains('高'))
+                && issue["suggested"]
+                    .as_str()
+                    .is_some_and(|s| s.contains('高'))
         }),
         "{json}"
     );
@@ -174,9 +177,10 @@ fn create_archive_writes_replaced_name_as_cp932() {
     replacements.insert("髙.png".into(), "高.png".into());
     create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![src.to_string_lossy().into_owned()],
             replacements,
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -258,9 +262,10 @@ fn starting_progress_emits_within_two_seconds() {
         move || {
             create_archive_direct(
                 &sandbox,
-                &CreateDto {
+                CreateDto {
                     paths: vec![src.to_string_lossy().into_owned()],
                     replacements: Default::default(),
+                    ..Default::default()
                 },
                 dest.to_str().unwrap(),
                 |p| {
@@ -288,9 +293,10 @@ fn ungranted_path_is_rejected() {
     let sandbox = Sandbox::new();
     let err = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![src.to_string_lossy().into_owned()],
             replacements: Default::default(),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -315,9 +321,10 @@ fn cancel_does_not_leave_dest() {
     let cancel = AtomicBool::new(false);
     let err = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![src_dir.to_string_lossy().into_owned()],
             replacements: Default::default(),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |p| {
@@ -358,9 +365,10 @@ fn symlink_input_is_rejected_before_follow() {
     let sandbox = grant(&[&root, &real, &link, &dest]);
     let err = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![link.to_string_lossy().into_owned()],
             replacements: Default::default(),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -378,9 +386,10 @@ fn symlink_input_is_rejected_before_follow() {
     let sandbox = grant(&[&root, &real_dir, &dest]);
     let err = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![format!("{}/", alias.display())],
             replacements: Default::default(),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -400,9 +409,10 @@ fn create_rejects_directory_as_dest() {
     let sandbox = grant(&[&root, &src]);
     let err = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![src.to_string_lossy().into_owned()],
             replacements: Default::default(),
+            ..Default::default()
         },
         root.to_str().unwrap(),
         |_| {},
@@ -422,9 +432,10 @@ fn create_dest_inside_input_tree_needs_own_grant() {
     let sandbox = grant(&[&root, &src]);
     let err = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![src.to_string_lossy().into_owned()],
             replacements: Default::default(),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -446,9 +457,10 @@ fn dest_inside_input_dir_is_rejected() {
     let sandbox = grant(&[&root, &src_dir, &dest]);
     let err = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![src_dir.to_string_lossy().into_owned()],
             replacements: Default::default(),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -473,9 +485,10 @@ fn save_dest_grant_does_not_admit_siblings() {
     sandbox.grant_save_dest(&dest);
     let err = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![sibling.to_string_lossy().into_owned()],
             replacements: Default::default(),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -500,9 +513,10 @@ fn parent_escape_via_dotdot_is_rejected() {
     sandbox.grant(&allowed);
     let err = create_archive_direct(
         &sandbox,
-        &CreateDto {
+        CreateDto {
             paths: vec![sneak.to_string_lossy().into_owned()],
             replacements: Default::default(),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -510,5 +524,60 @@ fn parent_escape_via_dotdot_is_rejected() {
     )
     .unwrap_err();
     assert!(err.contains("アクセスできません"), "{err}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn create_with_password_sets_aes_flags() {
+    let root = unique_dir("aes");
+    let src = root.join("が.txt");
+    fs::write(&src, b"ga").unwrap();
+    let dest = root.join("aes.zip");
+    let sandbox = grant(&[&root, &src, &dest]);
+    create_archive_direct(
+        &sandbox,
+        CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+            password: Some("secret".into()),
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .expect("aes create");
+    let headers = inspect_zip_headers(&dest).unwrap();
+    let file = headers
+        .iter()
+        .find(|e| e.name_raw.ends_with(b".txt"))
+        .unwrap();
+    assert_eq!(file.gpbf & EFS_UTF8_BIT, 0);
+    assert_eq!(file.gpbf & 1, 1);
+    assert!(file.has_aes_extra());
+    assert_eq!(hex(&file.name_raw), "82AA2E747874");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn create_rejects_empty_password() {
+    let root = unique_dir("aes-empty");
+    let src = root.join("a.txt");
+    fs::write(&src, b"a").unwrap();
+    let dest = root.join("a.zip");
+    let sandbox = grant(&[&root, &src, &dest]);
+    let err = create_archive_direct(
+        &sandbox,
+        CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+            password: Some(String::new()),
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("パスワードを入力"), "{err}");
+    assert!(!dest.exists());
     let _ = fs::remove_dir_all(&root);
 }

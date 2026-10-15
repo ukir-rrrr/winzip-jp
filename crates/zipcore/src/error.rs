@@ -13,6 +13,7 @@ pub enum ZipcoreError {
     EmptyInputs,
     Cancelled,
     AesNotImplemented,
+    EmptyPassword,
     SplitNotImplemented,
     Zip64Required {
         reason: String,
@@ -52,6 +53,9 @@ pub enum ZipcoreError {
     Encrypted {
         entry: String,
     },
+    InvalidPassword {
+        entry: String,
+    },
     UnsupportedEntry {
         entry: String,
         reason: String,
@@ -70,6 +74,7 @@ impl fmt::Display for ZipcoreError {
             Self::AesNotImplemented => {
                 write!(f, "パスワード付き ZIP はこのバージョンではまだ扱えません")
             }
+            Self::EmptyPassword => write!(f, "パスワードを入力してください"),
             Self::SplitNotImplemented => {
                 write!(f, "分割 ZIP はこのバージョンではまだ作れません")
             }
@@ -109,6 +114,9 @@ impl fmt::Display for ZipcoreError {
             }
             Self::Encrypted { entry } => {
                 write!(f, "パスワード付きのエントリがあります: {entry}")
+            }
+            Self::InvalidPassword { entry } => {
+                write!(f, "パスワードが違います: {entry}")
             }
             Self::UnsupportedEntry { entry, reason } => {
                 write!(f, "展開できないエントリです ({reason}): {entry}")
@@ -166,7 +174,7 @@ impl From<zip::result::ZipError> for ZipcoreError {
                 reason: "この形式は扱えません".into(),
             },
             zip::result::ZipError::FileNotFound => Self::Corrupt("エントリが見つかりません".into()),
-            zip::result::ZipError::InvalidPassword => Self::Encrypted {
+            zip::result::ZipError::InvalidPassword => Self::InvalidPassword {
                 entry: String::new(),
             },
             zip::result::ZipError::CompressionMethodNotSupported(_) => Self::UnsupportedEntry {

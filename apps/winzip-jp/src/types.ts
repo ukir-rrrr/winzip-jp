@@ -60,6 +60,7 @@ export type ExtractReport = {
 export type CreateReq = {
   paths: string[];
   replacements: Record<string, string>;
+  password?: string | null;
 };
 
 export type ExtractReq = {
