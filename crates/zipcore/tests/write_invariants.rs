@@ -522,6 +522,94 @@ fn japanese_password_is_utf8_bytes() {
 }
 
 #[test]
+fn aes_extract_without_password_fails_before_writing() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("書類").join("a.txt"), b"plain");
+    write_file(&src.join("b.txt"), b"other");
+    let dest = tmp.path().join("aes.zip");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src,
+            as_dir: true,
+        }],
+        dest: dest.clone(),
+        password: Some(SecretString::new("secret")),
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap();
+    let dest_out = tmp.path().join("out");
+    fs::create_dir_all(&dest_out).unwrap();
+    let err = zipcore::extract_zip(
+        zipcore::ExtractRequest {
+            archive: dest,
+            dest: dest_out.clone(),
+            encoding: None,
+            overwrite: false,
+            password: None,
+        },
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(matches!(err, ZipcoreError::Encrypted { .. }));
+    assert!(!dest_out.join("src").exists());
+    assert!(!dest_out.join("src").join("b.txt").exists());
+}
+
+#[test]
+fn aes_tampered_ciphertext_is_rejected() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("a.txt");
+    write_file(&src, b"payload-for-hmac");
+    let dest = tmp.path().join("aes.zip");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src,
+            as_dir: false,
+        }],
+        dest: dest.clone(),
+        password: Some(SecretString::new("secret")),
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap();
+    let entries = inspect_zip_headers(&dest).unwrap();
+    let file = entries
+        .iter()
+        .find(|e| !e.name_raw.ends_with(b"/"))
+        .unwrap();
+    let data_start = 30 + file.name_raw.len() + file.extra_local.len();
+    let flip = data_start + 18 + 4;
+    let mut bytes = fs::read(&dest).unwrap();
+    assert!(flip < bytes.len(), "ciphertext offset {flip}");
+    bytes[flip] ^= 0x01;
+    fs::write(&dest, bytes).unwrap();
+    let dest_out = tmp.path().join("out");
+    fs::create_dir_all(&dest_out).unwrap();
+    let err = zipcore::extract_zip(
+        zipcore::ExtractRequest {
+            archive: dest,
+            dest: dest_out.clone(),
+            encoding: None,
+            overwrite: false,
+            password: Some(SecretString::new("secret")),
+        },
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(
+        !matches!(err, ZipcoreError::EmptyPassword),
+        "tamper must fail decrypt/auth, got {err}"
+    );
+    assert!(!dest_out.join("a.txt").exists());
+}
+
+#[test]
 fn dest_inside_input_dir_is_rejected() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("src");

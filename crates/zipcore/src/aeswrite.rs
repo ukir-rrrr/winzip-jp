@@ -66,7 +66,7 @@ pub struct Aes256Writer<W> {
     counter: [u8; 16],
     xor: [u8; 16],
     xor_off: usize,
-    hmac: HmacSha1,
+    hmac: Option<HmacSha1>,
     header: Option<([u8; SALT_LEN], [u8; PWD_VERIFY_LEN])>,
 }
 
@@ -92,14 +92,18 @@ impl<W: Write> Aes256Writer<W> {
             counter: [0; 16],
             xor: [0; 16],
             xor_off: 16,
-            hmac,
+            hmac: Some(hmac),
             header: Some((salt, pwd_verify)),
         }
     }
 
     pub fn finish(mut self) -> io::Result<W> {
         self.write_header()?;
-        let code = Mac::finalize(self.hmac.clone()).into_bytes();
+        let hmac = self
+            .hmac
+            .take()
+            .ok_or_else(|| io::Error::other("AES writer already finished"))?;
+        let code = Mac::finalize(hmac).into_bytes();
         self.inner_mut()?.write_all(&code[..AUTH_CODE_LEN])?;
         self.inner
             .take()
@@ -140,7 +144,10 @@ impl<W: Write> Write for Aes256Writer<W> {
         self.write_header()?;
         let mut tmp = Zeroizing::new(buf.to_vec());
         self.crypt_in_place(&mut tmp);
-        self.hmac.update(&tmp);
+        self.hmac
+            .as_mut()
+            .ok_or_else(|| io::Error::other("AES writer already finished"))?
+            .update(&tmp);
         self.inner_mut()?.write_all(&tmp)?;
         Ok(buf.len())
     }
@@ -152,6 +159,7 @@ impl<W: Write> Write for Aes256Writer<W> {
 
 impl<W> Drop for Aes256Writer<W> {
     fn drop(&mut self) {
+        self.hmac.take();
         self.counter.zeroize();
         self.xor.zeroize();
     }

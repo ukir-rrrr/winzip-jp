@@ -123,6 +123,17 @@ pub fn extract_zip(
 
     let mut archive = open_archive(&req.archive)?;
     let catalog = catalog_archive(&mut archive, req.encoding)?;
+    if req.password.is_none() {
+        if let Some(entry) = catalog
+            .entries
+            .iter()
+            .find(|e| e.encrypted && !e.listed.is_dir)
+        {
+            return Err(ZipcoreError::Encrypted {
+                entry: entry.listed.display_name.clone(),
+            });
+        }
+    }
     let bytes_total: u64 = catalog
         .entries
         .iter()
