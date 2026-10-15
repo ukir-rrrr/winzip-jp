@@ -84,7 +84,30 @@ pub fn is_split_sibling(dest_zip: &Path, candidate: &Path) -> bool {
 }
 
 /// `foo.zip` の隣に `foo.z01` があれば分割セット。順序は z01, z02, …, zip。
+/// 最後の `.zip` の EOCD が単一ディスク（ThisDisk = 0）なら兄弟は無視する。
+/// 分割なら ThisDisk が最後の番号なので、それより先の古い `.zNN` は拾わない。
 pub fn discover_volumes(zip_path: &Path) -> Vec<PathBuf> {
+    if !zip_path.exists() {
+        return vec![zip_path.to_path_buf()];
+    }
+    match last_zip_this_disk(zip_path) {
+        Some(0) => return vec![zip_path.to_path_buf()],
+        Some(this_disk) => {
+            let mut out = Vec::new();
+            for i in 1..=u32::from(this_disk) {
+                let p = volume_path(zip_path, i, false);
+                if p.exists() {
+                    out.push(p);
+                }
+            }
+            out.push(zip_path.to_path_buf());
+            out
+        }
+        None => walk_existing_volumes(zip_path),
+    }
+}
+
+fn walk_existing_volumes(zip_path: &Path) -> Vec<PathBuf> {
     let first = volume_path(zip_path, 1, false);
     if !first.exists() {
         return vec![zip_path.to_path_buf()];
@@ -101,6 +124,37 @@ pub fn discover_volumes(zip_path: &Path) -> Vec<PathBuf> {
     }
     out.push(zip_path.to_path_buf());
     out
+}
+
+fn last_zip_this_disk(zip_path: &Path) -> Option<u16> {
+    let mut f = File::open(zip_path).ok()?;
+    let len = f.metadata().ok()?.len();
+    if len < 22 {
+        return None;
+    }
+    let back = (len - 22).min(65_535) + 22;
+    f.seek(SeekFrom::Start(len - back)).ok()?;
+    let mut data = Vec::new();
+    f.read_to_end(&mut data).ok()?;
+    let eocd = find_eocd_end(&data)?;
+    Some(u16::from_le_bytes(
+        data[eocd + 4..eocd + 6].try_into().ok()?,
+    ))
+}
+
+/// 今回のセットに含まれない `dest.zNN` を消す。キャンセルでは呼ばない。
+pub fn discard_stale_volumes(dest: &Path, keep_count: u32) -> io::Result<()> {
+    let keep = final_volume_paths(dest, keep_count.max(1));
+    for i in 1..=MAX_PIECES {
+        let p = volume_path(dest, i, false);
+        if keep.iter().any(|k| path_eq(k, &p)) {
+            continue;
+        }
+        if p.exists() {
+            fs::remove_file(&p)?;
+        }
+    }
+    Ok(())
 }
 
 /// 完成後の最終パス一覧（非末尾 `.zNN` + 最後の `dest`）。
@@ -253,11 +307,7 @@ fn find_eocd_end(data: &[u8]) -> Option<usize> {
 
 /// 最後の `.zip` ピースの EOCD（this_disk, cd_disk, cd_size, cd_offset）。
 pub fn last_volume_eocd(zip_path: &Path) -> io::Result<(u16, u16, u32, u32)> {
-    let volumes = discover_volumes(zip_path);
-    let last = volumes
-        .last()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "分割ピースがありません"))?;
-    let data = fs::read(last)?;
+    let data = fs::read(zip_path)?;
     let eocd = find_eocd_end(&data).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -544,7 +594,10 @@ impl SplitSink for SplitWriter {
     }
 
     fn ensure_record_fits(&mut self, len: u64) -> io::Result<()> {
-        if self.unbounded_last || len == 0 || len >= self.split_bytes {
+        // レコードが残り容量に収まらないときは次ピース先頭へ送る。
+        // `len >= split_bytes` でも境界パディングはする（ヘッダ跨ぎを避ける）。
+        // レコード自体が split_bytes 以上ならピースをはみ出す。UI プリセットは 8 MB 以上。
+        if self.unbounded_last || len == 0 {
             return Ok(());
         }
         let off = self.pos % self.split_bytes;
@@ -627,11 +680,7 @@ impl Drop for SplitWriter {
 
 /// 最後の `.zip` ファイルの末尾が EOCD か（コメントなしなら末尾 22 バイト）。
 pub fn eocd_in_last_volume(zip_path: &Path) -> io::Result<bool> {
-    let volumes = discover_volumes(zip_path);
-    let last = volumes
-        .last()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "分割ピースがありません"))?;
-    let data = fs::read(last)?;
+    let data = fs::read(zip_path)?;
     Ok(find_eocd_end(&data).is_some())
 }
 
@@ -763,6 +812,45 @@ mod tests {
         assert_eq!(w.volume_index(), 1);
         assert_eq!(w.offset_in_volume().unwrap(), 26);
         assert_eq!(w.piece_count(), 2);
+    }
+
+    #[test]
+    fn discover_volumes_ignores_siblings_of_single_disk_zip() {
+        let tmp = TempDir::new();
+        let dest = tmp.path().join("out.zip");
+        let mut eocd = vec![0u8; 22];
+        eocd[0..4].copy_from_slice(&SIG_EOCD.to_le_bytes());
+        fs::write(&dest, &eocd).unwrap();
+        fs::write(tmp.path().join("out.z01"), b"stale").unwrap();
+        fs::write(tmp.path().join("out.z02"), b"stale2").unwrap();
+        assert_eq!(discover_volumes(&dest), vec![dest.clone()]);
+        let data = linearize_volumes(&dest).unwrap();
+        assert_eq!(data, eocd);
+    }
+
+    #[test]
+    fn discover_volumes_ignores_extra_piece_beyond_this_disk() {
+        let tmp = TempDir::new();
+        let dest = tmp.path().join("out.zip");
+        let mut w = SplitWriter::create(dest.clone(), 16).unwrap();
+        w.write_all(&[1u8; 20]).unwrap();
+        w.finish_on_last_piece();
+        let mut eocd = [0u8; 22];
+        eocd[0..4].copy_from_slice(&SIG_EOCD.to_le_bytes());
+        eocd[4..6].copy_from_slice(&1u16.to_le_bytes());
+        eocd[6..8].copy_from_slice(&1u16.to_le_bytes());
+        w.write_all(&eocd).unwrap();
+        let pieces = w.finish().unwrap();
+        assert_eq!(pieces.len(), 2);
+        fs::write(tmp.path().join("out.z02"), b"leftover").unwrap();
+        let vols = discover_volumes(&dest);
+        assert_eq!(vols.len(), 2);
+        assert!(vols[0].ends_with("out.z01"));
+        assert_eq!(vols[1], dest);
+        discard_stale_volumes(&dest, 2).unwrap();
+        assert!(!tmp.path().join("out.z02").exists());
+        assert!(pieces[0].exists());
+        assert!(dest.exists());
     }
 
     #[test]

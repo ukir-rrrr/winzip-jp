@@ -181,6 +181,8 @@ pub fn create_archive_direct(
         sandbox.resolve_save_file(piece)?;
     }
     publish_tmp_set(&tmp_vols, &dest_vols).map_err(publish_err_ja)?;
+    zipcore::split::discard_stale_volumes(&dest, dest_vols.len() as u32)
+        .map_err(|e| map_err(e.into()))?;
     Ok(WriteReportDto::from(report).with_dest(&dest))
 }
 

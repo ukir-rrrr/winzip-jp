@@ -629,5 +629,25 @@ fn create_split_writes_z01_and_zip_with_cp932_names() {
         .unwrap();
     assert_eq!(hex(&file.name_raw), "82AA2E747874");
     assert_eq!(file.gpbf & EFS_UTF8_BIT, 0);
+    create_archive_direct(
+        &sandbox,
+        CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+            ..Default::default()
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .expect("overwrite without split");
+    assert!(!z01.exists(), "stale z01 must be removed");
+    let headers = inspect_zip_headers(&dest).unwrap();
+    let file = headers
+        .iter()
+        .find(|e| e.name_raw.ends_with(b".txt"))
+        .unwrap();
+    assert_eq!(hex(&file.name_raw), "82AA2E747874");
+    assert_eq!(file.gpbf & EFS_UTF8_BIT, 0);
     let _ = fs::remove_dir_all(&root);
 }

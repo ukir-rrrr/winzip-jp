@@ -851,6 +851,65 @@ fn split_smaller_than_limit_is_single_zip() {
 }
 
 #[test]
+fn leftover_split_pieces_do_not_spoil_later_single_zip() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("が.txt"), &incompressible(2400));
+    write_file(&src.join("blob.bin"), &incompressible(1800));
+    let dest = tmp.path().join("out.zip");
+    let req = WriteRequest {
+        inputs: vec![
+            InputItem {
+                abs_path: src.join("が.txt"),
+                as_dir: false,
+            },
+            InputItem {
+                abs_path: src.join("blob.bin"),
+                as_dir: false,
+            },
+        ],
+        dest: dest.clone(),
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: Some(512),
+        replacements: BTreeMap::new(),
+    };
+    write_zip(req, |_| {}, &AtomicBool::new(false)).expect("split");
+    let z01 = dest.with_file_name("out.z01");
+    assert!(z01.exists());
+    let src2 = tmp.path().join("src2");
+    write_file(&src2.join("が.txt"), b"one");
+    let req2 = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src2.join("が.txt"),
+            as_dir: false,
+        }],
+        dest: dest.clone(),
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    write_zip(req2, |_| {}, &AtomicBool::new(false)).expect("single");
+    assert!(!z01.exists(), "stale z01 must be removed on overwrite");
+    fs::write(&z01, b"stale leftover").unwrap();
+    let headers = inspect_zip_headers(&dest).unwrap();
+    let file = headers
+        .iter()
+        .find(|e| e.name_raw.ends_with(b".txt"))
+        .unwrap();
+    assert_eq!(hex(&file.name_raw), "82AA2E747874");
+    assert_eq!(file.gpbf & EFS_UTF8_BIT, 0);
+    assert_eq!(
+        headers
+            .iter()
+            .filter(|e| !e.name_raw.ends_with(b"/"))
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn split_cancel_deletes_every_piece() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("src");
