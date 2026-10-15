@@ -223,7 +223,7 @@ pub fn is_container_tmp(path: &Path) -> bool {
         return false;
     }
     let name = abs.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-    name.starts_with(TMP_PREFIX) || name.starts_with(".winzip-jp-tmp-")
+    name.starts_with(TMP_PREFIX)
 }
 
 /// コンテナ tmp を fsync してからユーザー先へ rename（別ボリュームは copy+remove）。
