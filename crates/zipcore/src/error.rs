@@ -137,25 +137,55 @@ impl From<zip::result::ZipError> for ZipcoreError {
     fn from(value: zip::result::ZipError) -> Self {
         match value {
             zip::result::ZipError::Io(e) => Self::Io(e),
-            zip::result::ZipError::InvalidArchive(msg) => Self::Corrupt(msg.into_owned()),
+            zip::result::ZipError::InvalidArchive(_) => {
+                Self::Corrupt("アーカイブが壊れています".into())
+            }
             zip::result::ZipError::UnsupportedArchive(zip::result::ZipError::PASSWORD_REQUIRED) => {
                 Self::Encrypted {
                     entry: String::new(),
                 }
             }
-            zip::result::ZipError::UnsupportedArchive(msg) => Self::UnsupportedEntry {
+            zip::result::ZipError::UnsupportedArchive(_) => Self::UnsupportedEntry {
                 entry: String::new(),
-                reason: msg.to_string(),
+                reason: "この形式は扱えません".into(),
             },
             zip::result::ZipError::FileNotFound => Self::Corrupt("エントリが見つかりません".into()),
             zip::result::ZipError::InvalidPassword => Self::Encrypted {
                 entry: String::new(),
             },
-            zip::result::ZipError::CompressionMethodNotSupported(m) => Self::UnsupportedEntry {
+            zip::result::ZipError::CompressionMethodNotSupported(_) => Self::UnsupportedEntry {
                 entry: String::new(),
-                reason: format!("圧縮メソッド {m}"),
+                reason: "非対応の圧縮方式です".into(),
             },
-            other => Self::Corrupt(other.to_string()),
+            _ => Self::Corrupt("ZIP を読めません".into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zip_crate_errors_map_to_japanese() {
+        let invalid = ZipcoreError::from(zip::result::ZipError::InvalidArchive(
+            "Invalid digital signature file".into(),
+        ));
+        let text = invalid.to_string();
+        assert!(text.contains("壊れ"), "{text}");
+        assert!(!text.contains("Invalid"), "{text}");
+
+        let unsupported = ZipcoreError::from(zip::result::ZipError::UnsupportedArchive(
+            "The compression method is not supported",
+        ));
+        let text = unsupported.to_string();
+        assert!(text.contains("扱えません"), "{text}");
+        assert!(!text.contains("compression"), "{text}");
+
+        let other = ZipcoreError::from(zip::result::ZipError::FileNotFound);
+        assert_eq!(
+            other.to_string(),
+            "ZIP が壊れています: エントリが見つかりません"
+        );
     }
 }

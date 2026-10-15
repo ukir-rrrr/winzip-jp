@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use zipcore::{
-    extract_zip, list_zip, write_zip, AesMode, ExtractRequest, InputItem, ListRequest,
-    NameEncoding, ProgressPhase, SecretString, WriteRequest, ZipcoreError, EFS_UTF8_BIT,
+    encode_entry_name, extract_zip, list_zip, write_zip, AesMode, ExtractRequest, InputItem,
+    ListRequest, NameEncoding, ProgressPhase, SecretString, WriteRequest, ZipcoreError,
+    EFS_UTF8_BIT,
 };
 
 fn workspace_root() -> PathBuf {
@@ -280,6 +281,67 @@ fn extract_rejects_drive_letter() {
     assert_extract_traversal(b"C:/evil");
     assert_extract_traversal(br"C:\evil");
     assert_extract_traversal(b"C:evil");
+}
+
+#[test]
+fn extract_rejects_colon_ads_name() {
+    assert_extract_traversal(b"foo:bar");
+    assert_extract_traversal(b"dir/foo:bar.txt");
+}
+
+#[test]
+fn extract_accepts_cp932_names_with_0x5c_trail() {
+    let tmp = support::TempDir::new();
+    let hyo = encode_entry_name("表.txt").cp932;
+    let so = encode_entry_name("ソ.txt").cp932;
+    assert_eq!(hyo[1], 0x5C, "表 trail must be 0x5C");
+    assert_eq!(so[1], 0x5C, "ソ trail must be 0x5C");
+    let zip = tmp.path().join("yen.zip");
+    write_stored_zip(&zip, &[(&hyo, b"hyo", 0), (&so, b"so", 0)]);
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(&dest).unwrap();
+    extract_zip(
+        extract_req(zip, dest.clone(), false),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(fs::read(dest.join("表.txt")).unwrap(), b"hyo");
+    assert_eq!(fs::read(dest.join("ソ.txt")).unwrap(), b"so");
+}
+
+#[test]
+fn extract_missing_archive_is_input_missing_and_does_not_create_dest() {
+    let tmp = support::TempDir::new();
+    let dest = tmp.path().join("out");
+    assert!(!dest.exists());
+    let err = extract_zip(
+        extract_req(tmp.path().join("missing.zip"), dest.clone(), false),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(matches!(err, ZipcoreError::InputMissing { .. }), "{err}");
+    assert!(!dest.exists());
+}
+
+#[test]
+fn extract_rejects_file_ancestor_at_plan() {
+    let tmp = support::TempDir::new();
+    let zip = tmp.path().join("c.zip");
+    write_stored_zip(&zip, &[(b"foo/bar.txt", b"nested", 0)]);
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(&dest).unwrap();
+    fs::write(dest.join("foo"), b"i-am-a-file").unwrap();
+    let err = extract_zip(
+        extract_req(zip, dest.clone(), true),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(matches!(err, ZipcoreError::Corrupt(_)), "{err}");
+    assert_eq!(fs::read(dest.join("foo")).unwrap(), b"i-am-a-file");
+    assert!(!dest.join("foo").is_dir());
 }
 
 #[test]

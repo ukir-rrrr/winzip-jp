@@ -13,7 +13,7 @@ use zip::ZipArchive;
 
 use crate::encoding::{decode_name, detect_encoding, Detection, NameEncoding};
 use crate::error::ZipcoreError;
-use crate::fsutil::{absolute, atomic_replace, path_eq, stays_under};
+use crate::fsutil::{absolute, path_eq, replace_keeping_backup, stays_under};
 use crate::job::{check_cancel, Progress, ProgressPhase, SecretString};
 
 const COPY_BUF: usize = 64 * 1024;
@@ -103,9 +103,14 @@ pub fn extract_zip(
     if req.password.is_some() {
         return Err(ZipcoreError::AesNotImplemented);
     }
+    if !req.archive.exists() {
+        return Err(ZipcoreError::InputMissing {
+            path: req.archive.clone(),
+        });
+    }
 
-    let dest_canon = prepare_dest(&req.dest)?;
     let archive_canon = fs::canonicalize(&req.archive)?;
+    let dest_canon = prepare_dest(&req.dest)?;
     if path_eq(&archive_canon, &dest_canon) || stays_under(&dest_canon, &archive_canon) {
         return Err(ZipcoreError::DestOverlapsInput {
             dest: req.dest.clone(),
@@ -298,7 +303,7 @@ fn extract_one_file(
     out.sync_all()?;
     drop(out);
 
-    let backup = atomic_replace(&tmp, &item.dest)?;
+    let backup = replace_keeping_backup(&tmp, &item.dest)?;
     session.temps.pop();
     if let Some(backup) = backup {
         session.backups.push((item.dest.clone(), backup));
@@ -396,9 +401,9 @@ fn catalog_archive(
     let mut dests = DestSet::default();
     for raw in raw_entries {
         let display_name = decode_name(&raw.name_raw, encoding);
-        if let Some(reason) = unsafe_entry_reason(&raw.name_raw, &display_name) {
+        if unsafe_entry_reason(&raw.name_raw, &display_name).is_some() {
             return Err(ZipcoreError::PathTraversal {
-                entry: format!("{display_name} ({reason})"),
+                entry: display_name,
             });
         }
         if raw.encrypted {
@@ -503,6 +508,26 @@ fn dest_conflict(display_name: &str) -> ZipcoreError {
     ))
 }
 
+fn dest_type_conflict(display_name: &str) -> ZipcoreError {
+    ZipcoreError::Corrupt(format!(
+        "ファイルとフォルダが衝突しています: {display_name}"
+    ))
+}
+
+fn ancestor_is_file(dest: &Path, dest_canon: &Path) -> bool {
+    let mut cur = dest.parent();
+    while let Some(path) = cur {
+        if path_eq(path, dest_canon) {
+            break;
+        }
+        if path.exists() && !path.is_dir() {
+            return true;
+        }
+        cur = path.parent();
+    }
+    false
+}
+
 fn zip_err(err: zip::result::ZipError, entry: &str) -> ZipcoreError {
     match ZipcoreError::from(err) {
         ZipcoreError::Encrypted { entry: name } if name.is_empty() => ZipcoreError::Encrypted {
@@ -543,11 +568,10 @@ fn plan_outputs<'a>(
         if dest.exists() {
             let dest_is_dir = dest.is_dir();
             if dest_is_dir != entry.listed.is_dir {
-                return Err(ZipcoreError::Corrupt(format!(
-                    "ファイルとフォルダが衝突しています: {}",
-                    entry.listed.display_name
-                )));
+                return Err(dest_type_conflict(&entry.listed.display_name));
             }
+        } else if ancestor_is_file(&dest, dest_canon) {
+            return Err(dest_type_conflict(&entry.listed.display_name));
         }
         out.push(PlannedOutput { entry, dest });
     }
@@ -603,23 +627,68 @@ fn join_under_dest(
     Ok(current)
 }
 
-/// raw と表示名の両方を見る。区切りは ZIP 上では ASCII の `/` と `\`。
+/// raw と表示名の両方を見る。区切りは ASCII の `/` と、CP932 の 2 バイト目ではない `\`。
 pub(crate) fn unsafe_entry_reason(raw: &[u8], display: &str) -> Option<&'static str> {
     if raw.contains(&0) || display.contains('\0') {
-        return Some("NUL");
+        return Some("NUL文字");
     }
     let unified = display.replace('\\', "/");
     let trimmed = unified.trim_matches('/');
     if trimmed.is_empty() || trimmed.split('/').all(|c| c.is_empty() || c == ".") {
-        return Some("empty");
+        return Some("空の名前");
     }
     if raw_escapes(raw) {
-        return Some("raw");
+        return Some("不正な区切り");
     }
     if display_escapes(display) {
-        return Some("name");
+        return Some("不正な名前");
     }
     None
+}
+
+fn is_cp932_lead(b: u8) -> bool {
+    (0x81..=0x9F).contains(&b) || (0xE0..=0xFC).contains(&b)
+}
+
+fn is_cp932_trail(b: u8) -> bool {
+    (0x40..=0x7E).contains(&b) || (0x80..=0xFC).contains(&b)
+}
+
+/// CP932 の 2 バイト文字を 1 単位として進める。
+fn next_raw_unit(raw: &[u8], i: usize) -> usize {
+    if i + 1 < raw.len() && is_cp932_lead(raw[i]) && is_cp932_trail(raw[i + 1]) {
+        2
+    } else {
+        1
+    }
+}
+
+fn for_each_raw_component(raw: &[u8], mut visit: impl FnMut(&[u8]) -> bool) -> bool {
+    let mut i = 0;
+    let mut start = 0;
+    while i < raw.len() {
+        let step = next_raw_unit(raw, i);
+        if step == 1 && (raw[i] == b'/' || raw[i] == b'\\') {
+            if visit(&raw[start..i]) {
+                return true;
+            }
+            start = i + 1;
+        }
+        i += step;
+    }
+    visit(&raw[start..])
+}
+
+fn raw_has_ascii_colon(raw: &[u8]) -> bool {
+    let mut i = 0;
+    while i < raw.len() {
+        let step = next_raw_unit(raw, i);
+        if step == 1 && raw[i] == b':' {
+            return true;
+        }
+        i += step;
+    }
+    false
 }
 
 fn raw_escapes(raw: &[u8]) -> bool {
@@ -629,18 +698,12 @@ fn raw_escapes(raw: &[u8]) -> bool {
     if raw[0] == b'/' || raw[0] == b'\\' {
         return true;
     }
-    if raw.len() >= 2 && raw[1] == b':' && raw[0].is_ascii_alphabetic() {
+    if raw_has_ascii_colon(raw) {
         return true;
     }
-    for part in raw.split(|b| *b == b'/' || *b == b'\\') {
-        if part == b".." || part.contains(&0) {
-            return true;
-        }
-        if is_reserved_dos_bytes(part) {
-            return true;
-        }
-    }
-    false
+    for_each_raw_component(raw, |part| {
+        part == b".." || part.contains(&0) || is_reserved_dos_bytes(part)
+    })
 }
 
 fn display_escapes(name: &str) -> bool {
@@ -679,10 +742,11 @@ fn unsafe_component(component: &str) -> bool {
     if component.is_empty() || component == ".." {
         return true;
     }
-    if component.contains('\0') || component.contains('\\') || component.contains('/') {
-        return true;
-    }
-    if looks_like_drive(component) {
+    if component.contains('\0')
+        || component.contains('\\')
+        || component.contains('/')
+        || component.contains(':')
+    {
         return true;
     }
     if is_reserved_dos_name(component) {
@@ -861,6 +925,25 @@ mod tests {
         assert!(unsafe_entry_reason(b"ok/file.txt", "ok/file.txt").is_none());
         assert!(unsafe_entry_reason(b"dir/", "dir/").is_none());
         assert!(unsafe_entry_reason("が.txt".as_bytes(), "が.txt").is_none());
+        assert!(unsafe_entry_reason(b"foo:bar", "foo:bar").is_some());
+        // 表 / ソ の 2 バイト目は 0x5C。区切りと誤認しない。
+        let hyo = [0x95, 0x5C, b'.', b't', b'x', b't'];
+        assert!(
+            unsafe_entry_reason(&hyo, "表.txt").is_none(),
+            "表.txt raw={:02X?}",
+            hyo
+        );
+        let so = [0x83, 0x5C, b'.', b't', b'x', b't'];
+        assert!(
+            unsafe_entry_reason(&so, "ソ.txt").is_none(),
+            "ソ.txt raw={:02X?}",
+            so
+        );
+        let hyo_nul = [0x95, 0x5C, b'N', b'U', b'L', b'.', b't', b'x', b't'];
+        assert!(
+            unsafe_entry_reason(&hyo_nul, "表NUL.txt").is_none(),
+            "表NUL.txt must not look like reserved NUL"
+        );
         assert!(unsafe_entry_reason(b"", "").is_some());
         assert!(unsafe_entry_reason(b".", ".").is_some());
         assert!(unsafe_entry_reason(b"././.", "././.").is_some());
@@ -872,5 +955,17 @@ mod tests {
         assert!(unsafe_entry_reason(b"NUL", "NUL").is_some());
         assert!(unsafe_entry_reason(b"CON.txt", "CON.txt").is_some());
         assert!(unsafe_entry_reason(b"hello.txt", "hello.txt").is_none());
+    }
+
+    #[test]
+    fn path_traversal_display_is_japanese() {
+        let err = ZipcoreError::PathTraversal {
+            entry: "foo/../bar".into(),
+        };
+        let text = err.to_string();
+        assert!(text.contains("展開先"), "{text}");
+        assert!(!text.contains("(raw)"), "{text}");
+        assert!(!text.contains("(name)"), "{text}");
+        assert!(!text.contains("(empty)"), "{text}");
     }
 }
