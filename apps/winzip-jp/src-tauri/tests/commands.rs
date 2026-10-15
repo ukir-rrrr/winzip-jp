@@ -588,7 +588,9 @@ fn create_rejects_empty_password() {
 fn create_split_writes_z01_and_zip_with_cp932_names() {
     let root = unique_dir("split");
     let src = root.join("が.txt");
-    let payload: Vec<u8> = (0..4000).map(|i| (i.wrapping_mul(37) + 9) as u8).collect();
+    let payload: Vec<u8> = (0..4000u32)
+        .map(|i| (i.wrapping_mul(37) + 9) as u8)
+        .collect();
     fs::write(&src, &payload).unwrap();
     let dest = root.join("out.zip");
     let mut sandbox = Sandbox::new();

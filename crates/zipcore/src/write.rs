@@ -23,7 +23,7 @@ use crate::pkzip::{
     inspect_reader, inspect_zip, patch_local_sizes, write_central_header, write_eocd,
     write_local_header, CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED, VERSION_NEEDED,
 };
-use crate::split::{self, SplitWriter};
+use crate::split::{self, FinishOnLastPiece, SplitWriter};
 
 pub use crate::job::{Progress, ProgressPhase, SecretString};
 pub use crate::pkzip::InspectedEntry;
@@ -242,7 +242,7 @@ fn write_plan_to_partial(
     Ok(report)
 }
 
-fn write_plan_into<W: Write + Seek>(
+fn write_plan_into<W: Write + Seek + FinishOnLastPiece>(
     out: &mut W,
     plan: &Plan,
     dest: &Path,
@@ -295,6 +295,7 @@ fn write_plan_into<W: Write + Seek>(
         bytes_total,
     });
 
+    out.finish_on_last_piece();
     let cd_offset = out.stream_position()?;
     if cd_offset > u32::MAX as u64 {
         return Err(ZipcoreError::Zip64Required {

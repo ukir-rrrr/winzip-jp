@@ -244,6 +244,13 @@ impl Seek for ConcatReader {
     }
 }
 
+/// 中央ディレクトリ以降は最後のピースに載せ、`split_bytes` を超えてよい。
+pub trait FinishOnLastPiece {
+    fn finish_on_last_piece(&mut self) {}
+}
+
+impl FinishOnLastPiece for File {}
+
 /// 論理オフセットをピースへ割り振る `Write + Seek`。
 pub struct SplitWriter {
     dest: PathBuf,
@@ -252,6 +259,7 @@ pub struct SplitWriter {
     paths: Vec<PathBuf>,
     pos: u64,
     len: u64,
+    unbounded_last: bool,
 }
 
 impl SplitWriter {
@@ -268,6 +276,7 @@ impl SplitWriter {
             paths: Vec::new(),
             pos: 0,
             len: 0,
+            unbounded_last: false,
         };
         writer.ensure_piece(0).map_err(map_split_io)?;
         Ok(writer)
@@ -283,6 +292,10 @@ impl SplitWriter {
 
     pub fn split_size(&self) -> u64 {
         self.split_bytes
+    }
+
+    fn last_piece_start(&self) -> u64 {
+        self.files.len().saturating_sub(1) as u64 * self.split_bytes
     }
 
     fn ensure_piece(&mut self, index: usize) -> io::Result<()> {
@@ -369,10 +382,25 @@ fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
+impl FinishOnLastPiece for SplitWriter {
+    fn finish_on_last_piece(&mut self) {
+        self.unbounded_last = true;
+    }
+}
+
 impl Write for SplitWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
+        }
+        if self.unbounded_last && !self.files.is_empty() && self.pos >= self.last_piece_start() {
+            let idx = self.files.len() - 1;
+            let off = self.pos - self.last_piece_start();
+            self.files[idx].seek(SeekFrom::Start(off))?;
+            let wrote = self.files[idx].write(buf)?;
+            self.pos += wrote as u64;
+            self.len = self.len.max(self.pos);
+            return Ok(wrote);
         }
         self.locate()?;
         let piece_off = self.pos % self.split_bytes;
@@ -401,7 +429,16 @@ impl Seek for SplitWriter {
             SeekFrom::Current(p) => self.pos.saturating_add_signed(p),
         };
         self.pos = next;
-        if self.pos <= self.len && !self.files.is_empty() {
+        if self.files.is_empty() {
+            return Ok(self.pos);
+        }
+        if self.unbounded_last && self.pos >= self.last_piece_start() {
+            let off = self.pos - self.last_piece_start();
+            let idx = self.files.len() - 1;
+            self.files[idx].seek(SeekFrom::Start(off))?;
+            return Ok(self.pos);
+        }
+        if self.pos <= self.len {
             self.locate()?;
         }
         Ok(self.pos)
@@ -416,26 +453,17 @@ impl Drop for SplitWriter {
     }
 }
 
-/// 連結ストリームが EOCD で終わり、その末尾が最後の `.zip` ピースに載っているか。
-/// EOCD がピース境界をまたいでも、終端バイトが最後のピースにあればよい。
+/// 最後の `.zip` ファイルの末尾 22 バイトが EOCD か（7-Zip が分割セットと認識する条件）。
 pub fn eocd_in_last_volume(zip_path: &Path) -> io::Result<bool> {
     let volumes = discover_volumes(zip_path);
     let last = volumes
         .last()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "分割ピースがありません"))?;
-    let last_len = fs::metadata(last)?.len();
-    if last_len == 0 {
+    let data = fs::read(last)?;
+    if data.len() < 22 {
         return Ok(false);
     }
-    let joined = join_volumes(zip_path)?;
-    if joined.len() < 22 {
-        return Ok(false);
-    }
-    let sig = u32::from_le_bytes(
-        joined[joined.len() - 22..joined.len() - 18]
-            .try_into()
-            .unwrap(),
-    );
+    let sig = u32::from_le_bytes(data[data.len() - 22..data.len() - 18].try_into().unwrap());
     Ok(sig == SIG_EOCD)
 }
 
@@ -513,17 +541,26 @@ mod tests {
     }
 
     #[test]
-    fn eocd_may_straddle_piece_boundary() {
+    fn finish_on_last_piece_keeps_eocd_together() {
         let tmp = TempDir::new();
         let dest = tmp.path().join("out.zip");
         let mut w = SplitWriter::create(dest.clone(), 16).unwrap();
         w.write_all(&[1u8; 20]).unwrap();
+        w.finish_on_last_piece();
         let mut eocd = [0u8; 22];
         eocd[0..4].copy_from_slice(&SIG_EOCD.to_le_bytes());
         w.write_all(&eocd).unwrap();
-        w.finish().unwrap();
+        let pieces = w.finish().unwrap();
+        assert!(pieces.len() >= 2);
+        let last = fs::read(&dest).unwrap();
+        assert!(last.len() >= 22);
+        assert_eq!(
+            &last[last.len() - 22..last.len() - 18],
+            &SIG_EOCD.to_le_bytes()
+        );
         assert!(eocd_in_last_volume(&dest).unwrap());
-        assert!(fs::metadata(&dest).unwrap().len() < 22);
+        let z01 = fs::metadata(&pieces[0]).unwrap().len();
+        assert!(z01 <= 16, "non-last piece {z01} > 16");
     }
 
     #[test]

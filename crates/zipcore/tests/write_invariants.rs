@@ -857,7 +857,7 @@ fn split_cancel_deletes_every_piece() {
 fn split_with_password_keeps_cp932_and_encrypt_bit() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("src");
-    write_file(&src.join("が.txt"), &incompressible(2000));
+    write_file(&src.join("が.txt"), &incompressible(12 * 1024));
     let dest = tmp.path().join("out.zip");
     let req = WriteRequest {
         inputs: vec![InputItem {
@@ -867,7 +867,7 @@ fn split_with_password_keeps_cp932_and_encrypt_bit() {
         dest: dest.clone(),
         password: Some(SecretString::new("secret")),
         aes: AesMode::Aes256,
-        split_bytes: Some(400),
+        split_bytes: Some(256),
         replacements: BTreeMap::new(),
     };
     write_zip(req, |_| {}, &AtomicBool::new(false)).expect("split+aes");
@@ -895,6 +895,6 @@ fn split_with_password_keeps_cp932_and_encrypt_bit() {
     .expect("decrypt split aes");
     assert_eq!(
         fs::read(tmp.path().join("out").join("が.txt")).unwrap(),
-        incompressible(2000)
+        incompressible(12 * 1024)
     );
 }
