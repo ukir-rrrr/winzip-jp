@@ -1,0 +1,22 @@
+{
+  "encoding": "utf8",
+  "confidence": 0.95,
+  "ambiguous": false,
+  "entries": [
+    {
+      "name_hex": "E3818C2E747874",
+      "gpbf": 2048,
+      "size": 3
+    },
+    {
+      "name_hex": "E38389E382ADE383A5E383A1E383B3E383882E747874",
+      "gpbf": 2048,
+      "size": 5
+    },
+    {
+      "name_hex": "726561646D652E747874",
+      "gpbf": 2048,
+      "size": 6
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "encoding": "cp932",
+  "confidence": 0.4,
+  "ambiguous": true,
+  "entries": [
+    {
+      "name_hex": "E3818C2E747874",
+      "gpbf": 0,
+      "size": 8
+    },
+    {
+      "name_hex": "8368834C83858381839383672E747874",
+      "gpbf": 0,
+      "size": 11
+    }
+  ]
+}
