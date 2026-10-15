@@ -141,6 +141,30 @@ pub fn display_path(path: &std::path::Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressDto {
+    pub phase: zipcore::ProgressPhase,
+    pub current_entry: Option<String>,
+    pub entries_done: u32,
+    pub entries_total: u32,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+}
+
+impl From<&Progress> for ProgressDto {
+    fn from(value: &Progress) -> Self {
+        Self {
+            phase: value.phase,
+            current_entry: value.current_entry.clone(),
+            entries_done: value.entries_done,
+            entries_total: value.entries_total,
+            bytes_done: value.bytes_done,
+            bytes_total: value.bytes_total,
+        }
+    }
+}
+
 pub fn starting_progress() -> Progress {
     Progress {
         phase: zipcore::ProgressPhase::Starting,

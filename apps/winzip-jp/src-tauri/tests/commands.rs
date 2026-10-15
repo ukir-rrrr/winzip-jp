@@ -274,6 +274,54 @@ fn js_cannot_grant_ungranted_paths() {
 }
 
 #[test]
+fn create_rejects_directory_as_dest() {
+    let root = unique_dir("dest-dir");
+    let src = root.join("a.txt");
+    fs::write(&src, b"x").unwrap();
+    let sandbox = grant(&[&root, &src]);
+    let err = create_archive_direct(
+        &sandbox,
+        &CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+        },
+        root.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("フォルダ"), "{err}");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn save_dest_grant_does_not_admit_siblings() {
+    let root = unique_dir("save-sib");
+    let src = root.join("ok.txt");
+    let sibling = root.join("secret.txt");
+    let dest = root.join("out.zip");
+    fs::write(&src, b"ok").unwrap();
+    fs::write(&sibling, b"no").unwrap();
+    let mut sandbox = Sandbox::new();
+    sandbox.grant(&src);
+    sandbox.grant_save_dest(&dest);
+    let err = create_archive_direct(
+        &sandbox,
+        &CreateDto {
+            paths: vec![sibling.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("アクセスできません"), "{err}");
+    assert!(!dest.exists());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn parent_escape_via_dotdot_is_rejected() {
     let root = unique_dir("escape");
     let allowed = root.join("allowed");

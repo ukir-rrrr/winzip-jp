@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -14,7 +14,7 @@ use zipcore::{
 
 use crate::dto::{
     path_buf, starting_progress, CreateDto, ExtractDto, ExtractReportDto, ListReportDto, PlanDto,
-    WriteReportDto,
+    ProgressDto, WriteReportDto,
 };
 use crate::sandbox::{container_tmp_zip, discard_tmp, publish_tmp, Sandbox};
 
@@ -46,7 +46,7 @@ impl Drop for BusyGuard {
 }
 
 pub fn emit_progress(window: &tauri::Window, progress: &Progress) {
-    let _ = window.emit(PROGRESS_EVENT, progress);
+    let _ = window.emit(PROGRESS_EVENT, &ProgressDto::from(progress));
 }
 
 fn map_err(err: ZipcoreError) -> String {
@@ -61,29 +61,6 @@ fn lock_sandbox(
         .map_err(|_| "内部状態をロックできません".to_string())
 }
 
-fn require_allowed(sandbox: &Sandbox, path: &Path) -> Result<PathBuf, String> {
-    let abs = zipcore::absolute(path);
-    if abs.as_os_str().is_empty() {
-        return Err("パスが空です".into());
-    }
-    if !sandbox.allows(&abs) {
-        return Err(format!("この場所にはアクセスできません: {}", abs.display()));
-    }
-    let resolved = if abs.exists() {
-        fs::canonicalize(&abs)
-            .map_err(|e| format!("パスを解決できません: {} ({})", abs.display(), io_ja(e)))?
-    } else {
-        zipcore::resolve_path(&abs)
-    };
-    if !sandbox.allows(&resolved) {
-        return Err(format!(
-            "この場所にはアクセスできません: {}",
-            resolved.display()
-        ));
-    }
-    Ok(resolved)
-}
-
 fn io_ja(err: std::io::Error) -> String {
     match err.kind() {
         std::io::ErrorKind::NotFound => "見つかりません".into(),
@@ -95,10 +72,7 @@ fn io_ja(err: std::io::Error) -> String {
 fn resolve_inputs(sandbox: &Sandbox, paths: &[String]) -> Result<Vec<InputItem>, String> {
     let mut inputs = Vec::with_capacity(paths.len());
     for raw in paths {
-        if raw.contains('\0') {
-            return Err("パスが不正です".into());
-        }
-        let path = require_allowed(sandbox, &path_buf(raw))?;
+        let path = sandbox.resolve(&path_buf(raw))?;
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| format!("入力が見つかりません: {}", path.display()))?;
         if meta.file_type().is_symlink() {
@@ -145,10 +119,10 @@ pub fn create_archive_direct(
     cancel: &AtomicBool,
 ) -> Result<WriteReportDto, String> {
     progress(starting_progress());
-    if dest.contains('\0') {
-        return Err("パスが不正です".into());
+    let dest = sandbox.resolve(&path_buf(dest))?;
+    if dest.is_dir() {
+        return Err("保存先がフォルダです".into());
     }
-    let dest = require_allowed(sandbox, &path_buf(dest))?;
     let inputs = resolve_inputs(sandbox, &req.paths)?;
     planned_sources_in_scope(sandbox, &inputs)?;
 
@@ -164,21 +138,22 @@ pub fn create_archive_direct(
     let result = write_zip(write_req, &mut progress, cancel);
     match result {
         Ok(report) => {
+            if inspect_zip_headers(&tmp)
+                .map_err(|e| {
+                    discard_tmp(&tmp);
+                    map_err(e)
+                })?
+                .iter()
+                .any(|e| e.gpbf & EFS_UTF8_BIT != 0)
+            {
+                discard_tmp(&tmp);
+                return Err("EFS（bit 11）が立っています".into());
+            }
             if let Err(e) = publish_tmp(&tmp, &dest) {
                 discard_tmp(&tmp);
                 return Err(format!("保存先へ移せませんでした: {}", io_ja(e)));
             }
-            let mut dto = WriteReportDto::from(report).with_dest(&dest);
-            if inspect_zip_headers(&dest)
-                .map_err(map_err)?
-                .iter()
-                .any(|e| e.gpbf & EFS_UTF8_BIT != 0)
-            {
-                let _ = fs::remove_file(&dest);
-                return Err("EFS（bit 11）が立っています".into());
-            }
-            dto.dest = dest.to_string_lossy().into_owned();
-            Ok(dto)
+            Ok(WriteReportDto::from(report).with_dest(&dest))
         }
         Err(e) => {
             discard_tmp(&tmp);
@@ -192,10 +167,7 @@ pub fn list_archive_direct(
     path: &str,
     encoding: Option<NameEncoding>,
 ) -> Result<ListReportDto, String> {
-    if path.contains('\0') {
-        return Err("パスが不正です".into());
-    }
-    let archive = require_allowed(sandbox, &path_buf(path))?;
+    let archive = sandbox.resolve(&path_buf(path))?;
     let report = list_zip(ListRequest { archive, encoding }).map_err(map_err)?;
     Ok(ListReportDto::from(report))
 }
@@ -207,11 +179,11 @@ pub fn extract_archive_direct(
     cancel: &AtomicBool,
 ) -> Result<ExtractReportDto, String> {
     progress(starting_progress());
-    if req.archive.contains('\0') || req.dest.contains('\0') {
-        return Err("パスが不正です".into());
+    let archive = sandbox.resolve(&path_buf(&req.archive))?;
+    let dest = sandbox.resolve(&path_buf(&req.dest))?;
+    if !dest.is_dir() {
+        return Err("展開先がフォルダではありません".into());
     }
-    let archive = require_allowed(sandbox, &path_buf(&req.archive))?;
-    let dest = require_allowed(sandbox, &path_buf(&req.dest))?;
     let report = extract_zip(
         ExtractRequest {
             archive,
@@ -268,9 +240,6 @@ fn extend_fs_scope(app: &tauri::AppHandle, paths: &[PathBuf]) {
             let _ = scope.allow_directory(path, true);
         } else {
             let _ = scope.allow_file(path);
-            if let Some(parent) = path.parent() {
-                let _ = scope.allow_directory(parent, false);
-            }
         }
     }
 }
@@ -421,16 +390,9 @@ pub async fn pick_save_zip(
     };
     let path = file_path_to_buf(file)?;
     let mut sandbox = lock_sandbox(&state.sandbox)?;
-    sandbox.grant(&path);
-    if let Some(parent) = path.parent() {
-        sandbox.grant(parent);
-    }
+    sandbox.grant_save_dest(&path);
     drop(sandbox);
-    let mut scope_paths = vec![path.clone()];
-    if let Some(parent) = path.parent() {
-        scope_paths.push(parent.to_path_buf());
-    }
-    extend_fs_scope(&app, &scope_paths);
+    extend_fs_scope(&app, &[path.clone()]);
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
@@ -457,9 +419,11 @@ pub async fn pick_extract_dir(
 }
 
 pub fn grant_dropped(state: &AppState, app: &tauri::AppHandle, paths: &[PathBuf]) -> Vec<String> {
-    if let Ok(mut sandbox) = state.sandbox.lock() {
-        sandbox.grant_many(paths);
-    }
+    let Ok(mut sandbox) = state.sandbox.lock() else {
+        return Vec::new();
+    };
+    sandbox.grant_many(paths);
+    drop(sandbox);
     extend_fs_scope(app, paths);
     paths
         .iter()

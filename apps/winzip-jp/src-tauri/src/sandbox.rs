@@ -79,6 +79,8 @@ mod scoped {
 
 struct Grant {
     path: PathBuf,
+    /// フォルダ選択 / フォルダドロップだけ true。保存先ファイルは false。
+    recursive: bool,
     #[cfg(target_os = "macos")]
     _access: Option<scoped::ScopedUrl>,
 }
@@ -86,30 +88,21 @@ struct Grant {
 #[derive(Default)]
 pub struct Sandbox {
     grants: Vec<Grant>,
+    #[cfg(target_os = "macos")]
+    kernel_holds: Vec<scoped::ScopedUrl>,
 }
 
 impl Sandbox {
     pub fn new() -> Self {
-        Self { grants: Vec::new() }
+        Self::default()
     }
 
-    /// ダイアログ / ドロップで渡ったパスをセッション許可に足す。
+    /// ダイアログ / ドロップで選んだ入力。ディレクトリなら配下も許可。
     pub fn grant(&mut self, path: &Path) {
         let abs = absolute(path);
         let stored = resolve_path(&abs);
-        if self.grants.iter().any(|g| path_eq(&g.path, &stored)) {
-            return;
-        }
-        let is_dir = stored.is_dir() || abs.is_dir();
-        // startAccessing はダイアログ/ドロップの元パス。比較キーは canonicalize 後。
-        #[cfg(target_os = "macos")]
-        let access = scoped::ScopedUrl::start(&abs, is_dir);
-        self.grants.push(Grant {
-            path: stored,
-            #[cfg(target_os = "macos")]
-            _access: access,
-        });
-        let _ = is_dir;
+        let recursive = stored.is_dir() || abs.is_dir();
+        self.insert(abs, stored, recursive);
     }
 
     pub fn grant_many<P: AsRef<Path>>(&mut self, paths: impl IntoIterator<Item = P>) {
@@ -118,25 +111,72 @@ impl Sandbox {
         }
     }
 
+    /// 保存先 ZIP。ファイルだけ許可し、親フォルダはカーネル許可のみ。
+    pub fn grant_save_dest(&mut self, path: &Path) {
+        let abs = absolute(path);
+        let stored = resolve_path(&abs);
+        self.insert(abs.clone(), stored, false);
+        if let Some(parent) = abs.parent() {
+            self.hold_kernel(parent, true);
+        }
+    }
+
+    fn insert(&mut self, original: PathBuf, stored: PathBuf, recursive: bool) {
+        if let Some(existing) = self.grants.iter_mut().find(|g| path_eq(&g.path, &stored)) {
+            existing.recursive |= recursive;
+            return;
+        }
+        let is_dir = stored.is_dir() || original.is_dir();
+        // startAccessing はダイアログ/ドロップの元パス。比較キーは canonicalize 後。
+        #[cfg(target_os = "macos")]
+        let access = scoped::ScopedUrl::start(&original, is_dir);
+        self.grants.push(Grant {
+            path: stored,
+            recursive,
+            #[cfg(target_os = "macos")]
+            _access: access,
+        });
+        let _ = (original, is_dir);
+    }
+
+    fn hold_kernel(&mut self, path: &Path, is_dir: bool) {
+        #[cfg(target_os = "macos")]
+        if let Some(url) = scoped::ScopedUrl::start(path, is_dir) {
+            self.kernel_holds.push(url);
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (path, is_dir);
+        }
+    }
+
     pub fn allows(&self, path: &Path) -> bool {
-        let abs = resolve_path(path);
-        if is_container_tmp(&abs) {
-            return true;
-        }
-        if self.covers(&abs) {
-            return true;
-        }
-        abs.parent().is_some_and(|parent| self.covers(parent))
+        self.covers(&resolve_path(path))
     }
 
     fn covers(&self, path: &Path) -> bool {
-        self.grants
-            .iter()
-            .any(|g| path_eq(path, &g.path) || stays_under(path, &g.path))
+        self.grants.iter().any(|g| {
+            if path_eq(path, &g.path) {
+                return true;
+            }
+            g.recursive && stays_under(path, &g.path)
+        })
     }
 
-    pub fn granted_roots(&self) -> Vec<PathBuf> {
-        self.grants.iter().map(|g| g.path.clone()).collect()
+    /// コマンド引数を許可ルート配下へ正規化する。
+    pub fn resolve(&self, path: &Path) -> Result<PathBuf, String> {
+        let raw = path.to_string_lossy();
+        if raw.is_empty() || raw.contains('\0') {
+            return Err("パスが不正です".into());
+        }
+        let resolved = resolve_path(path);
+        if !self.covers(&resolved) {
+            return Err(format!(
+                "この場所にはアクセスできません: {}",
+                resolved.display()
+            ));
+        }
+        Ok(resolved)
     }
 
     /// 許可パスだけを複製する。security-scoped の寿命は元の `Sandbox` が持つ。
@@ -147,10 +187,13 @@ impl Sandbox {
                 .iter()
                 .map(|g| Grant {
                     path: g.path.clone(),
+                    recursive: g.recursive,
                     #[cfg(target_os = "macos")]
                     _access: None,
                 })
                 .collect(),
+            #[cfg(target_os = "macos")]
+            kernel_holds: Vec::new(),
         }
     }
 }
@@ -181,6 +224,12 @@ pub fn is_container_tmp(path: &Path) -> bool {
 
 /// コンテナ tmp を fsync してからユーザー先へ rename（別ボリュームは copy+remove）。
 pub fn publish_tmp(tmp: &Path, dest: &Path) -> io::Result<()> {
+    if !is_container_tmp(tmp) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "コンテナ一時ファイルではありません",
+        ));
+    }
     if tmp.exists() {
         let file = File::open(tmp)?;
         file.sync_all()?;
@@ -211,11 +260,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn temp_prefix_is_allowed_without_grant() {
-        let sandbox = Sandbox::new();
+    fn container_tmp_name_is_recognized() {
         let tmp = container_tmp_zip();
-        assert!(sandbox.allows(&tmp));
         assert!(is_container_tmp(&tmp));
+        assert!(!Sandbox::new().allows(&tmp));
     }
 
     #[test]
@@ -285,5 +333,27 @@ mod tests {
             assert!(sandbox.allows(&canon.join(child.file_name().unwrap())));
         }
         let _ = fs::remove_dir_all(&child);
+    }
+
+    #[test]
+    fn save_dest_does_not_open_siblings() {
+        let root = std::env::temp_dir().join(format!(
+            "winzip-jp-save-sib-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let dest = root.join("out.zip");
+        let sibling = root.join("secret.txt");
+        fs::write(&sibling, b"no").unwrap();
+        let mut sandbox = Sandbox::new();
+        sandbox.grant_save_dest(&dest);
+        assert!(sandbox.allows(&dest));
+        assert!(!sandbox.allows(&sibling));
+        assert!(!sandbox.allows(&root));
+        let _ = fs::remove_dir_all(&root);
     }
 }
