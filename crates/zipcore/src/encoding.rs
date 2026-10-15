@@ -83,8 +83,9 @@ pub struct Detection {
 
 /// Unicode の ZIP エントリ名を NFC → 置換表 → CP932 にする。
 ///
-/// パス成分が `.` または `..` のときは、置換の有無にかかわらず `_` にする
-/// （ZIP 名にパストラバーサル成分を残さない）。
+/// 入力の `\` は `/` に正規化し、macOS 上でファイル名文字だった場合でも
+/// issues に記録する。パス成分が `.` または `..` のときは、置換の有無に
+/// かかわらず `_` にする（ZIP 名にパストラバーサル成分を残さない）。
 /// 同一 ZIP 内のバイト列衝突（` (2)` 連番）は `plan_write`（PR 2）側の責務。
 pub fn encode_entry_name(unicode_path: &str) -> EncodedName {
     let slash_path = unicode_path.replace('\\', "/");
@@ -99,6 +100,14 @@ pub fn encode_entry_name(unicode_path: &str) -> EncodedName {
     let relative_path = join_slash(&nfc_components, trailing_slash);
 
     let mut issues = Vec::new();
+    if unicode_path.contains('\\') {
+        issues.push(Unmappable {
+            relative_path: relative_path.clone(),
+            original_char: "\\".to_string(),
+            suggested: "/".to_string(),
+            kind: UnmappableKind::Other,
+        });
+    }
     let mut encoded_components = Vec::with_capacity(nfc_components.len());
     for component in &nfc_components {
         encoded_components.push(encode_component(component, &relative_path, &mut issues));
@@ -700,6 +709,11 @@ mod tests {
     fn backslash_becomes_slash_and_trailing_slash_kept() {
         let encoded = encode_entry_name("dir\\sub\\");
         assert_eq!(encoded.cp932, b"dir/sub/");
+        assert_eq!(encoded.issues.len(), 1);
+        assert_eq!(encoded.issues[0].original_char, "\\");
+        assert_eq!(encoded.issues[0].suggested, "/");
+        assert_eq!(encoded.issues[0].kind, UnmappableKind::Other);
+        assert_eq!(encoded.issues[0].relative_path, "dir/sub/");
     }
 
     #[test]
