@@ -19,7 +19,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+# PowerShell 5.1 leaves $PSScriptRoot empty when -File uses a \\?\ path.
+function Convert-WinPath([string]$p) {
+    if (-not $p) { return $p }
+    if ($p.StartsWith('\\?\UNC\')) { return ('\\' + $p.Substring(8)) }
+    if ($p.StartsWith('\\?\')) { return $p.Substring(4) }
+    return $p
+}
+
+$ZipPath = Convert-WinPath $ZipPath
+$ExpectPath = Convert-WinPath $ExpectPath
+$WorkDir = Convert-WinPath $WorkDir
+
+$scriptDir = $PSScriptRoot
+if (-not $scriptDir) {
+    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+$scriptDir = Convert-WinPath $scriptDir
+$RepoRoot = Resolve-Path (Join-Path $scriptDir '..\..')
 $Inspect = Join-Path $RepoRoot 'tests\oracles\inspect_zip.py'
 $Compare = Join-Path $RepoRoot 'tests\oracles\compare_extracted.py'
 

@@ -54,6 +54,21 @@ fn workspace_root() -> PathBuf {
         .expect("workspace root")
 }
 
+/// PowerShell 5.1 は `-File \\?\D:\...` だと `$PSScriptRoot` が空になり、
+/// `Join-Path` が `drive is null` で落ちる。拡張プレフィックスを外す。
+fn win_cmd_path(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        if let Some(unc) = rest.strip_prefix(r"UNC\") {
+            PathBuf::from(format!(r"\\{unc}"))
+        } else {
+            PathBuf::from(rest.to_string())
+        }
+    } else {
+        path.to_path_buf()
+    }
+}
+
 fn golden_root() -> PathBuf {
     workspace_root().join("tests/golden")
 }
@@ -216,6 +231,20 @@ fn python_bin() -> Option<&'static str> {
 }
 
 #[test]
+fn win_cmd_path_strips_verbatim_prefix() {
+    assert_eq!(
+        win_cmd_path(Path::new(
+            r"\\?\D:\a\winzip-jp\tests\oracles\windows-extract.ps1"
+        )),
+        PathBuf::from(r"D:\a\winzip-jp\tests\oracles\windows-extract.ps1")
+    );
+    assert_eq!(
+        win_cmd_path(Path::new(r"\\?\UNC\server\share\x.ps1")),
+        PathBuf::from(r"\\server\share\x.ps1")
+    );
+}
+
+#[test]
 fn windows_extract_ps1_is_utf8_bom_ascii() {
     let bytes = fs::read(workspace_root().join("tests/oracles/windows-extract.ps1"))
         .expect("windows-extract.ps1");
@@ -301,13 +330,13 @@ fn windows_oracle_7zip_and_optional_reports() {
         fs::create_dir_all(&work).unwrap();
         let out = Command::new("powershell")
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-            .arg(&ps1)
+            .arg(win_cmd_path(&ps1))
             .arg("-ZipPath")
-            .arg(&zip)
+            .arg(win_cmd_path(&zip))
             .arg("-ExpectPath")
-            .arg(case.dir.join("expected.json"))
+            .arg(win_cmd_path(&case.dir.join("expected.json")))
             .arg("-WorkDir")
-            .arg(&work)
+            .arg(win_cmd_path(&work))
             .output()
             .expect("powershell");
         assert!(
