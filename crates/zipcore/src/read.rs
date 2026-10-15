@@ -664,15 +664,21 @@ fn next_raw_unit(raw: &[u8], i: usize) -> usize {
     }
 }
 
-/// 末尾 `/`、または CP932 の 2 バイト目ではない末尾 `\` だけをディレクトリとみなす。
+/// 末尾 `/`、または先頭から見たとき単独バイトの末尾 `\` だけをディレクトリとみなす。
 fn zip_name_is_dir(raw: &[u8]) -> bool {
     if raw.ends_with(b"/") {
         return true;
     }
-    if raw.last() != Some(&b'\\') {
+    if !raw.ends_with(b"\\") {
         return false;
     }
-    raw.len() < 2 || next_raw_unit(raw, raw.len() - 2) != 2
+    let mut i = 0;
+    let mut last_start = 0;
+    while i < raw.len() {
+        last_start = i;
+        i += next_raw_unit(raw, i);
+    }
+    last_start + 1 == raw.len() && raw[last_start] == b'\\'
 }
 
 fn for_each_raw_component(raw: &[u8], mut visit: impl FnMut(&[u8]) -> bool) -> bool {
@@ -959,9 +965,12 @@ mod tests {
         assert!(!zip_name_is_dir(&hyo));
         assert!(!zip_name_is_dir(&so));
         assert!(!zip_name_is_dir(&[0x95, 0x5C]));
+        assert!(!zip_name_is_dir(&[0x88, 0x9F]));
         assert!(zip_name_is_dir(b"dir/"));
         assert!(zip_name_is_dir(br"dir\"));
         assert!(zip_name_is_dir(&[0x95, 0x5C, b'\\']));
+        // 亜 (88 9F) + 単独 0x5C。直前バイトだけ見ると 9F 5C を 1 文字と誤認する。
+        assert!(zip_name_is_dir(&[0x88, 0x9F, b'\\']));
         assert!(unsafe_entry_reason(b"", "").is_some());
         assert!(unsafe_entry_reason(b".", ".").is_some());
         assert!(unsafe_entry_reason(b"././.", "././.").is_some());

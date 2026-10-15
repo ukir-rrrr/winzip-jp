@@ -334,6 +334,27 @@ fn extract_cp932_name_ending_in_0x5c_is_a_file() {
 }
 
 #[test]
+fn extract_cp932_name_plus_standalone_backslash_is_dir() {
+    let tmp = support::TempDir::new();
+    let a = encode_entry_name("亜").cp932;
+    assert_eq!(a, [0x88, 0x9F]);
+    let mut dir_name = a.clone();
+    dir_name.push(b'\\');
+    let zip = tmp.path().join("a.zip");
+    write_stored_zip(&zip, &[(&dir_name, b"", 0)]);
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(&dest).unwrap();
+    extract_zip(
+        extract_req(zip, dest.clone(), false),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(dest.join("亜").is_dir());
+    assert!(!dest.join("亜").is_file());
+}
+
+#[test]
 fn extract_nfd_utf8_name_writes_nfc() {
     let tmp = support::TempDir::new();
     let nfd = "か\u{3099}.txt";
