@@ -42,6 +42,23 @@ pub enum ZipcoreError {
         dest: PathBuf,
     },
     Corrupt(String),
+    /// `..` / 絶対パス / ドライブレター / バックスラッシュ / シンボリックリンクなど。
+    PathTraversal {
+        entry: String,
+    },
+    OverwriteRequired {
+        paths: Vec<String>,
+    },
+    Encrypted {
+        entry: String,
+    },
+    UnsupportedEntry {
+        entry: String,
+        reason: String,
+    },
+    LimitsExceeded {
+        reason: String,
+    },
 }
 
 impl fmt::Display for ZipcoreError {
@@ -80,6 +97,23 @@ impl fmt::Display for ZipcoreError {
                 write!(f, "出力先が入力フォルダの中にあります: {}", dest.display())
             }
             Self::Corrupt(msg) => write!(f, "ZIP が壊れています: {msg}"),
+            Self::PathTraversal { entry } => {
+                write!(f, "ZIP 内のパスが展開先の外に出ます: {entry}")
+            }
+            Self::OverwriteRequired { paths } => {
+                write!(
+                    f,
+                    "次のファイルは既にあります。上書きを許可してください: {}",
+                    paths.join(", ")
+                )
+            }
+            Self::Encrypted { entry } => {
+                write!(f, "パスワード付きのエントリがあります: {entry}")
+            }
+            Self::UnsupportedEntry { entry, reason } => {
+                write!(f, "展開できないエントリです ({reason}): {entry}")
+            }
+            Self::LimitsExceeded { reason } => write!(f, "ZIP が大きすぎます: {reason}"),
         }
     }
 }
@@ -96,5 +130,32 @@ impl std::error::Error for ZipcoreError {
 impl From<io::Error> for ZipcoreError {
     fn from(value: io::Error) -> Self {
         Self::Io(value)
+    }
+}
+
+impl From<zip::result::ZipError> for ZipcoreError {
+    fn from(value: zip::result::ZipError) -> Self {
+        match value {
+            zip::result::ZipError::Io(e) => Self::Io(e),
+            zip::result::ZipError::InvalidArchive(msg) => Self::Corrupt(msg.into_owned()),
+            zip::result::ZipError::UnsupportedArchive(zip::result::ZipError::PASSWORD_REQUIRED) => {
+                Self::Encrypted {
+                    entry: String::new(),
+                }
+            }
+            zip::result::ZipError::UnsupportedArchive(msg) => Self::UnsupportedEntry {
+                entry: String::new(),
+                reason: msg.to_string(),
+            },
+            zip::result::ZipError::FileNotFound => Self::Corrupt("エントリが見つかりません".into()),
+            zip::result::ZipError::InvalidPassword => Self::Encrypted {
+                entry: String::new(),
+            },
+            zip::result::ZipError::CompressionMethodNotSupported(m) => Self::UnsupportedEntry {
+                entry: String::new(),
+                reason: format!("圧縮メソッド {m}"),
+            },
+            other => Self::Corrupt(other.to_string()),
+        }
     }
 }

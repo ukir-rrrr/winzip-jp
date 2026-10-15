@@ -2,5 +2,6 @@
 *.png binary
 *.ico binary
 *.icns binary
+*.zip binary
 # Windows PowerShell 5.1 needs CRLF + BOM (BOM is in the file bytes).
 *.ps1 text eol=crlf

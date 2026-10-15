@@ -10,7 +10,10 @@ use std::sync::atomic::AtomicBool;
 
 use serde::Deserialize;
 use unicode_normalization::UnicodeNormalization;
-use zipcore::{inspect_zip_headers, write_zip, AesMode, InputItem, WriteRequest, EFS_UTF8_BIT};
+use zipcore::{
+    extract_zip, inspect_zip_headers, plan_write, write_zip, AesMode, ExtractRequest, InputItem,
+    WriteRequest, EFS_UTF8_BIT,
+};
 
 #[derive(Debug, Deserialize)]
 struct Expected {
@@ -160,7 +163,7 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-fn write_case(case: &Case, payload: &Path, dest: &Path) -> zipcore::WriteReport {
+fn case_inputs(payload: &Path) -> Vec<InputItem> {
     let mut inputs = Vec::new();
     for ent in fs::read_dir(payload).unwrap() {
         let ent = ent.unwrap();
@@ -169,8 +172,12 @@ fn write_case(case: &Case, payload: &Path, dest: &Path) -> zipcore::WriteReport 
             as_dir: ent.file_type().unwrap().is_dir(),
         });
     }
+    inputs
+}
+
+fn write_case(case: &Case, payload: &Path, dest: &Path) -> zipcore::WriteReport {
     let req = WriteRequest {
-        inputs,
+        inputs: case_inputs(payload),
         dest: dest.to_path_buf(),
         password: None,
         aes: AesMode::Aes256,
@@ -354,6 +361,67 @@ fn windows_oracle_7zip_and_optional_reports() {
 #[ignore = "windows-oracle job は windows-2022 専用"]
 fn windows_oracle_7zip_and_optional_reports() {
     panic!("windows-oracle は windows-2022 で実行する");
+}
+
+#[test]
+fn golden_extract_bytes_match_source() {
+    for case in load_cases() {
+        let tmp = materialize(&case);
+        let payload = tmp.path().join("payload");
+        let zip = tmp.path().join("out.zip");
+        write_case(&case, &payload, &zip);
+        let plan = plan_write(&WriteRequest {
+            inputs: case_inputs(&payload),
+            dest: zip.clone(),
+            password: None,
+            aes: AesMode::Aes256,
+            split_bytes: None,
+            replacements: case.expected.replacements.clone(),
+        })
+        .unwrap_or_else(|e| panic!("{} plan: {e}", case.dir.display()));
+        let dest = tmp.path().join("extracted");
+        fs::create_dir_all(&dest).unwrap();
+        extract_zip(
+            ExtractRequest {
+                archive: zip,
+                dest: dest.clone(),
+                encoding: None,
+                overwrite: false,
+                password: None,
+            },
+            |_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap_or_else(|e| panic!("{} extract: {e}", case.dir.display()));
+        for entry in &plan.entries {
+            let rel = entry.relative_path.trim_end_matches('/');
+            let got_path = dest.join(rel);
+            if entry.is_dir {
+                assert!(
+                    got_path.is_dir(),
+                    "{} missing dir {}",
+                    case.dir.file_name().unwrap().to_string_lossy(),
+                    entry.relative_path
+                );
+                continue;
+            }
+            let got = fs::read(&got_path).unwrap_or_else(|e| {
+                panic!(
+                    "{} read {}: {e}",
+                    case.dir.file_name().unwrap().to_string_lossy(),
+                    got_path.display()
+                )
+            });
+            let want = fs::read(&entry.source).unwrap();
+            assert_eq!(
+                got,
+                want,
+                "{} content mismatch {}",
+                case.dir.file_name().unwrap().to_string_lossy(),
+                entry.relative_path
+            );
+        }
+    }
 }
 
 #[test]
