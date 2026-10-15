@@ -83,10 +83,14 @@ if [[ ! -x "$BIN" ]]; then
   ls -la "$APP/Contents/MacOS" >&2 || true
   exit 1
 fi
-if ! strings "$BIN" | grep -F -- "--e2e-open" >/dev/null; then
+STRINGS="$(mktemp)"
+strings "$BIN" > "$STRINGS"
+if ! grep -Fq -- "--e2e-open" "$STRINGS"; then
+  rm -f "$STRINGS"
   echo "debug e2e ビルドに --e2e-open がありません" >&2
   exit 1
 fi
+rm -f "$STRINGS"
 
 REPORT="$ARTIFACTS/sandbox-probe.json"
 SPLIT_OUT="$ARTIFACTS/e2e-split-outside/out.zip"
@@ -212,6 +216,7 @@ for y in range(y0, y1):
             nonwhite += 1
 ratio = nonwhite / total if total else 0
 print(f"s1 nonwhite={nonwhite}/{total} ({ratio:.3f})")
+# 実測: 白画面 0.00、ドロップゾーン 0.18。0.80 超はウィンドウ無しの暗い画面。
 if ratio < 0.02:
     raise SystemExit("s1-sandbox.png の WebView が白画面のままです")
 if ratio > 0.80:

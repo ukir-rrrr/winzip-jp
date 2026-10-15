@@ -34,10 +34,14 @@ if [[ ! -x "$BIN" ]]; then
   ls -la "$APP/Contents/MacOS" >&2 || true
   exit 1
 fi
-if strings "$BIN" | grep -F -- "--e2e-open" >/dev/null; then
+STRINGS="$(mktemp)"
+strings "$BIN" > "$STRINGS"
+if grep -Fq -- "--e2e-open" "$STRINGS"; then
+  rm -f "$STRINGS"
   echo "App Store バイナリに --e2e-open がある" >&2
   exit 1
 fi
+rm -f "$STRINGS"
 
 INFO="$APP/Contents/Info.plist"
 if [[ ! -f "$INFO" ]]; then

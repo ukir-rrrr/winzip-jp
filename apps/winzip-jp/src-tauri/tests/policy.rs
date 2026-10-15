@@ -268,8 +268,8 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
         "find | head で別 .app を拾わない"
     );
     assert!(
-        sh.contains("data.pop(key") || sh.contains("com.apple.developer.team-identifier"),
-        "ad-hoc 署名前に $TEAM_ID を外す"
+        sh.contains("data.pop(key") && sh.contains("grep -qF '$TEAM_ID'"),
+        "署名前に TEAM_ID キーを剥がし、署名後 XML でも残存を落とす"
     );
     assert!(
         !sh.contains("if ! sign"),
@@ -289,5 +289,9 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
     assert!(
         pkg.contains("Info.plist がありません"),
         "Info.plist 欠落をスキップしない"
+    );
+    assert!(
+        !pkg.contains("if strings \"$BIN\" | grep"),
+        "strings|grep の pipefail fail-open にしない"
     );
 }
