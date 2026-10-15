@@ -664,16 +664,17 @@ fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
         return Ok(());
     }
     if !to.exists() {
-        fs::copy(from, to)?;
+        // dest は新規。copy が途中で落ちたら中途半端な dest を残さない。
+        if let Err(e) = fs::copy(from, to) {
+            let _ = fs::remove_file(to);
+            return Err(e);
+        }
         let _ = fs::remove_file(from);
         return Ok(());
     }
     // Windows など rename が既存 dest を置換できない場合。dest は消さず退避する。
-    let backup = {
-        let mut name = to.as_os_str().to_os_string();
-        name.push(".bak");
-        PathBuf::from(name)
-    };
+    // `.bak` 固定だと利用者が置いた同名ファイルを上書き・削除するので一意にする。
+    let backup = unique_sidecar(to, "bak");
     fs::rename(to, &backup)?;
     let placed = fs::rename(from, to).or_else(|_| {
         fs::copy(from, to)?;
@@ -690,6 +691,14 @@ fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
             Err(e)
         }
     }
+}
+
+fn unique_sidecar(path: &Path, kind: &str) -> PathBuf {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut name = path.as_os_str().to_os_string();
+    name.push(format!(".{kind}.{}.{}", std::process::id(), n));
+    PathBuf::from(name)
 }
 
 fn resolve_dest(path: &Path) -> PathBuf {
