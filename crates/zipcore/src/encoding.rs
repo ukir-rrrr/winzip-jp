@@ -21,6 +21,22 @@ pub const COMPAT_IDEOGRAPH_REPLACEMENTS: &[(char, char)] = &[
     ('\u{FA11}', '\u{5D0E}'), // 﨑 → 崎
 ];
 
+/// WHATWG Shift_JIS が ASCII に落とす文字と、Windows CP932 では全角形で持つ記号。
+const SYMBOL_REPLACEMENTS: &[(char, char)] = &[
+    ('\u{00A5}', '\u{FFE5}'), // ¥ → ￥（0x5C 回避）
+    ('\u{203E}', '\u{FFE3}'), // ‾ → ￣（0x7E 回避）
+    ('\u{301C}', '\u{FF5E}'), // 〜 → ～
+    ('\u{00A2}', '\u{FFE0}'), // ¢ → ￠
+    ('\u{00A3}', '\u{FFE1}'), // £ → ￡
+    ('\u{00AC}', '\u{FFE2}'), // ¬ → ￢
+];
+
+const CONF_EFS_MAJORITY: f32 = 0.95;
+const CONF_UNICODE_PATH_MAJORITY: f32 = 0.9;
+const CONF_CONTENT: f32 = 0.8;
+const CONF_ALL_ASCII: f32 = 0.5;
+const CONF_AMBIGUOUS: f32 = 0.4;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NameEncoding {
@@ -32,6 +48,7 @@ pub enum NameEncoding {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum UnmappableKind {
+    /// 互換漢字・異体字の寄せ。NFKC で CP932 可能になった互換文字（ﬁ など）も含む。
     CompatIdeograph,
     Emoji,
     Other,
@@ -91,15 +108,10 @@ pub fn encode_entry_name(unicode_path: &str) -> EncodedName {
 }
 
 /// アーカイブ単位で読み方を 1 つ決める。混在は手動切替に倒す。
+///
+/// 判定順は設計 §3.4：bit 11 過半数 → 0x7075 CRC 一致過半数 → 全 ASCII → 非 ASCII 件数。
 pub fn detect_encoding(entries: &[(u16, Vec<u8>, Vec<u8>)]) -> Detection {
     let total = entries.len();
-    if total == 0 || entries.iter().all(|(_, raw, _)| raw.is_ascii()) {
-        return Detection {
-            encoding: NameEncoding::Cp932,
-            confidence: 0.5,
-            ambiguous: false,
-        };
-    }
 
     let efs_count = entries
         .iter()
@@ -108,7 +120,7 @@ pub fn detect_encoding(entries: &[(u16, Vec<u8>, Vec<u8>)]) -> Detection {
     if is_majority(efs_count, total) {
         return Detection {
             encoding: NameEncoding::Utf8,
-            confidence: 0.95,
+            confidence: CONF_EFS_MAJORITY,
             ambiguous: false,
         };
     }
@@ -120,7 +132,15 @@ pub fn detect_encoding(entries: &[(u16, Vec<u8>, Vec<u8>)]) -> Detection {
     if is_majority(unicode_path_count, total) {
         return Detection {
             encoding: NameEncoding::Utf8,
-            confidence: 0.9,
+            confidence: CONF_UNICODE_PATH_MAJORITY,
+            ambiguous: false,
+        };
+    }
+
+    if total == 0 || entries.iter().all(|(_, raw, _)| raw.is_ascii()) {
+        return Detection {
+            encoding: NameEncoding::Cp932,
+            confidence: CONF_ALL_ASCII,
             ambiguous: false,
         };
     }
@@ -142,21 +162,21 @@ pub fn detect_encoding(entries: &[(u16, Vec<u8>, Vec<u8>)]) -> Detection {
     if cp932_ok > utf8_ok {
         return Detection {
             encoding: NameEncoding::Cp932,
-            confidence: 0.8,
+            confidence: CONF_CONTENT,
             ambiguous: false,
         };
     }
     if utf8_ok > cp932_ok {
         return Detection {
             encoding: NameEncoding::Utf8,
-            confidence: 0.8,
+            confidence: CONF_CONTENT,
             ambiguous: false,
         };
     }
 
     Detection {
         encoding: NameEncoding::Cp932,
-        confidence: 0.4,
+        confidence: CONF_AMBIGUOUS,
         ambiguous: true,
     }
 }
@@ -184,7 +204,7 @@ fn encode_component(nfc: &str, relative_path: &str, issues: &mut Vec<Unmappable>
     let mut replaced = false;
     for grapheme in nfc.graphemes(true) {
         match replace_grapheme(grapheme) {
-            GraphemeMap::Keep => mapped.push_str(grapheme),
+            GraphemeMap::Keep { text } => mapped.push_str(&text),
             GraphemeMap::Replace { suggested, kind } => {
                 replaced = true;
                 issues.push(Unmappable {
@@ -206,7 +226,9 @@ fn encode_component(nfc: &str, relative_path: &str, issues: &mut Vec<Unmappable>
 }
 
 enum GraphemeMap {
-    Keep,
+    Keep {
+        text: String,
+    },
     Replace {
         suggested: String,
         kind: UnmappableKind,
@@ -214,29 +236,42 @@ enum GraphemeMap {
 }
 
 fn replace_grapheme(grapheme: &str) -> GraphemeMap {
-    let mut chars = grapheme.chars();
+    let stripped: String = grapheme
+        .chars()
+        .filter(|c| !is_variation_selector(*c))
+        .collect();
+    let g = if stripped.is_empty() {
+        grapheme
+    } else {
+        stripped.as_str()
+    };
+
+    let mut chars = g.chars();
     if let (Some(c), None) = (chars.next(), chars.next()) {
-        if let Some(to) = compat_replacement(c) {
+        if let Some((to, kind)) = forced_replacement(c) {
             return GraphemeMap::Replace {
                 suggested: to.to_string(),
-                kind: UnmappableKind::CompatIdeograph,
+                kind,
             };
         }
     }
 
-    if encode_cp932_without_replacement(grapheme).is_ok() {
-        return GraphemeMap::Keep;
+    if encode_cp932_without_replacement(g).is_ok() {
+        return GraphemeMap::Keep {
+            text: g.to_string(),
+        };
     }
 
-    let nfkc: String = grapheme.nfkc().collect();
-    if nfkc != grapheme && encode_cp932_without_replacement(&nfkc).is_ok() {
+    let nfkc: String = g.nfkc().collect();
+    if nfkc != g && encode_cp932_without_replacement(&nfkc).is_ok() && nfkc_is_safe_component(&nfkc)
+    {
         return GraphemeMap::Replace {
             suggested: nfkc,
             kind: UnmappableKind::CompatIdeograph,
         };
     }
 
-    if grapheme.chars().any(is_emoji_char) {
+    if g.chars().any(is_emoji_char) || grapheme.chars().any(is_emoji_char) {
         return GraphemeMap::Replace {
             suggested: "_".to_string(),
             kind: UnmappableKind::Emoji,
@@ -249,10 +284,26 @@ fn replace_grapheme(grapheme: &str) -> GraphemeMap {
     }
 }
 
-fn compat_replacement(c: char) -> Option<char> {
-    COMPAT_IDEOGRAPH_REPLACEMENTS
-        .iter()
-        .find_map(|&(from, to)| (from == c).then_some(to))
+fn forced_replacement(c: char) -> Option<(char, UnmappableKind)> {
+    for &(from, to) in COMPAT_IDEOGRAPH_REPLACEMENTS {
+        if from == c {
+            return Some((to, UnmappableKind::CompatIdeograph));
+        }
+    }
+    for &(from, to) in SYMBOL_REPLACEMENTS {
+        if from == c {
+            return Some((to, UnmappableKind::Other));
+        }
+    }
+    None
+}
+
+fn nfkc_is_safe_component(s: &str) -> bool {
+    !s.is_empty() && s != "." && s != ".." && !s.contains('/') && !s.contains('\\')
+}
+
+fn is_variation_selector(c: char) -> bool {
+    matches!(c as u32, 0xFE00..=0xFE0F | 0xE0100..=0xE01EF)
 }
 
 fn encode_cp932_without_replacement(s: &str) -> Result<Vec<u8>, char> {
@@ -476,11 +527,8 @@ mod tests {
         // encoding_rs の SHIFT_JIS は IBM 拡張で 髙 を FBFC にできるが、設計どおり 高 へ寄せる。
         assert!(encode_cp932_without_replacement("髙").is_ok());
         let encoded = encode_entry_name("髙.txt");
-        assert_eq!(encoded.cp932, cp932("高.txt"));
-        assert_eq!(
-            hex(&encoded.cp932),
-            format!("{}2E747874", hex(&cp932("高")))
-        );
+        assert_eq!(hex(&encoded.cp932), "8D822E747874");
+        assert_eq!(encoded.cp932, [0x8D, 0x82, 0x2E, 0x74, 0x78, 0x74]);
         assert_eq!(encoded.issues.len(), 1);
         assert_eq!(encoded.issues[0].original_char, "髙");
         assert_eq!(encoded.issues[0].suggested, "高");
@@ -492,7 +540,7 @@ mod tests {
     #[test]
     fn saki_compat_replaced_with_unified() {
         let encoded = encode_entry_name("﨑");
-        assert_eq!(encoded.cp932, cp932("崎"));
+        assert_eq!(hex(&encoded.cp932), "8DE8");
         assert_eq!(encoded.issues[0].suggested, "崎");
         assert_eq!(encoded.issues[0].kind, UnmappableKind::CompatIdeograph);
     }
@@ -500,7 +548,7 @@ mod tests {
     #[test]
     fn emoji_becomes_underscore() {
         let encoded = encode_entry_name("写真🎉.jpg");
-        assert_eq!(encoded.cp932, cp932("写真_.jpg"));
+        assert_eq!(hex(&encoded.cp932), "8ECA905E5F2E6A7067");
         assert_eq!(encoded.issues.len(), 1);
         assert_eq!(encoded.issues[0].original_char, "🎉");
         assert_eq!(encoded.issues[0].suggested, "_");
@@ -511,8 +559,63 @@ mod tests {
     fn flag_grapheme_becomes_single_underscore() {
         let encoded = encode_entry_name("🇯🇵.txt");
         assert_eq!(encoded.cp932, b"_.txt");
+        assert_eq!(hex(&encoded.cp932), "5F2E747874");
         assert_eq!(encoded.issues.len(), 1);
         assert_eq!(encoded.issues[0].kind, UnmappableKind::Emoji);
+    }
+
+    #[test]
+    fn yen_and_overline_do_not_become_ascii_backslash_or_tilde() {
+        let yen = encode_entry_name("¥100.txt");
+        assert!(!yen.cp932.contains(&0x5C), "U+00A5 must not encode as 0x5C");
+        assert_eq!(hex(&yen.cp932), "818F3130302E747874");
+        assert_eq!(yen.issues.len(), 1);
+        assert_eq!(yen.issues[0].original_char, "¥");
+        assert_eq!(yen.issues[0].suggested, "￥");
+        assert_eq!(yen.issues[0].kind, UnmappableKind::Other);
+
+        let overline = encode_entry_name("\u{203E}");
+        assert_ne!(overline.cp932, b"~");
+        assert_eq!(hex(&overline.cp932), "8150");
+        assert_eq!(overline.issues[0].suggested, "￣");
+    }
+
+    #[test]
+    fn wave_dash_maps_to_fullwidth_tilde() {
+        let encoded = encode_entry_name("〜");
+        assert_eq!(hex(&encoded.cp932), "8160");
+        assert_eq!(encoded.issues[0].original_char, "〜");
+        assert_eq!(encoded.issues[0].suggested, "～");
+        assert_eq!(encoded.issues[0].kind, UnmappableKind::Other);
+    }
+
+    #[test]
+    fn nfkc_must_not_inject_slash_or_backslash() {
+        let encoded = encode_entry_name("℅.txt");
+        assert_eq!(encoded.cp932, b"_.txt");
+        assert!(!encoded.cp932.contains(&b'/'));
+        assert!(!encoded.cp932.contains(&b'\\'));
+        assert_eq!(encoded.issues[0].suggested, "_");
+        assert_eq!(encoded.issues[0].kind, UnmappableKind::Other);
+    }
+
+    #[test]
+    fn ideographic_variation_selector_is_stripped() {
+        let encoded = encode_entry_name("辻\u{E0100}.txt");
+        assert_eq!(hex(&encoded.cp932), "92D22E747874");
+        assert!(encoded.issues.is_empty());
+    }
+
+    #[test]
+    fn nec_ibm_symbols_pin_cp932_hex() {
+        assert_eq!(hex(&encode_entry_name("①").cp932), "8740");
+        assert_eq!(hex(&encode_entry_name("ⅱ").cp932), "FA41");
+        assert_eq!(hex(&encode_entry_name("㈱").cp932), "878A");
+        assert_eq!(hex(&encode_entry_name("～").cp932), "8160");
+        assert_eq!(hex(&encode_entry_name("￥").cp932), "818F");
+        assert_eq!(hex(&encode_entry_name("¢").cp932), "8191");
+        assert_eq!(hex(&encode_entry_name("£").cp932), "8192");
+        assert_eq!(hex(&encode_entry_name("¬").cp932), "81CA");
     }
 
     #[test]
@@ -599,6 +702,16 @@ mod tests {
                 entries: vec![(0, ascii.clone(), vec![]), (0, b"a/b".to_vec(), vec![])],
                 encoding: NameEncoding::Cp932,
                 confidence: 0.5,
+                ambiguous: false,
+            },
+            Case {
+                name: "bit11 majority on ASCII still UTF-8 0.95 (design order)",
+                entries: vec![
+                    (EFS_UTF8_BIT, ascii.clone(), vec![]),
+                    (EFS_UTF8_BIT, b"a/b".to_vec(), vec![]),
+                ],
+                encoding: NameEncoding::Utf8,
+                confidence: 0.95,
                 ambiguous: false,
             },
             Case {
