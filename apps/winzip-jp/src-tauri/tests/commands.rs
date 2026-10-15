@@ -20,8 +20,9 @@ fn workspace_root() -> PathBuf {
 }
 
 fn unique_dir(label: &str) -> PathBuf {
+    // コンテナ tmp 接頭辞 `winzip-jp-` とは別名。grant 経路を本物に近づける。
     let path = std::env::temp_dir().join(format!(
-        "winzip-jp-cmd-{label}-{}-{}",
+        "wzjp-cmd-{label}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use zipcore::{absolute, atomic_replace, path_eq, stays_under};
+use zipcore::{absolute, atomic_replace, path_eq, resolve_path, stays_under};
 
 const TMP_PREFIX: &str = "winzip-jp-";
 
@@ -96,14 +96,16 @@ impl Sandbox {
     /// ダイアログ / ドロップで渡ったパスをセッション許可に足す。
     pub fn grant(&mut self, path: &Path) {
         let abs = absolute(path);
-        if self.grants.iter().any(|g| path_eq(&g.path, &abs)) {
+        let stored = resolve_path(&abs);
+        if self.grants.iter().any(|g| path_eq(&g.path, &stored)) {
             return;
         }
-        let is_dir = abs.is_dir();
+        let is_dir = stored.is_dir() || abs.is_dir();
+        // startAccessing はダイアログ/ドロップの元パス。比較キーは canonicalize 後。
         #[cfg(target_os = "macos")]
         let access = scoped::ScopedUrl::start(&abs, is_dir);
         self.grants.push(Grant {
-            path: abs,
+            path: stored,
             #[cfg(target_os = "macos")]
             _access: access,
         });
@@ -117,7 +119,7 @@ impl Sandbox {
     }
 
     pub fn allows(&self, path: &Path) -> bool {
-        let abs = absolute(path);
+        let abs = resolve_path(path);
         if is_container_tmp(&abs) {
             return true;
         }
@@ -168,8 +170,8 @@ pub fn container_tmp_zip() -> PathBuf {
 }
 
 pub fn is_container_tmp(path: &Path) -> bool {
-    let tmp = std::env::temp_dir();
-    let abs = absolute(path);
+    let tmp = resolve_path(&std::env::temp_dir());
+    let abs = resolve_path(path);
     if !stays_under(&abs, &tmp) {
         return false;
     }
@@ -221,5 +223,67 @@ mod tests {
         let sandbox = Sandbox::new();
         let outside = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
         assert!(!sandbox.allows(&outside));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn grant_via_symlink_allows_canonical_and_pending_dest() {
+        let root = std::env::temp_dir().join(format!(
+            "wzjp-scope-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let real = root.join("real");
+        fs::create_dir_all(&real).unwrap();
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+
+        let mut sandbox = Sandbox::new();
+        sandbox.grant(&alias);
+        let file = real.join("x.txt");
+        fs::write(&file, b"x").unwrap();
+        assert!(sandbox.allows(&file));
+        assert!(sandbox.allows(&alias.join("x.txt")));
+        let dest = alias.join("out.zip");
+        sandbox.grant(&dest);
+        assert!(sandbox.allows(&dest));
+        let canon_real = fs::canonicalize(&real).unwrap();
+        assert!(sandbox.allows(&canon_real.join("out.zip")));
+        assert!(!sandbox.allows(&root.join("outside.txt")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_temp_dir_and_canonical_temp_are_same_grant() {
+        let tmp = std::env::temp_dir();
+        let canon = fs::canonicalize(&tmp).expect("temp_dir");
+        let child = tmp.join(format!(
+            "wzjp-mac-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&child).unwrap();
+        let mut sandbox = Sandbox::new();
+        sandbox.grant(&child);
+        let dest = child.join("out.zip");
+        sandbox.grant(&dest);
+        assert!(sandbox.allows(&child));
+        assert!(sandbox.allows(&dest));
+        let canon_child = fs::canonicalize(&child).unwrap();
+        assert!(sandbox.allows(&canon_child));
+        assert!(sandbox.allows(&canon_child.join("out.zip")));
+        if tmp != canon {
+            assert!(sandbox.allows(&canon.join(child.file_name().unwrap())));
+        }
+        let _ = fs::remove_dir_all(&child);
     }
 }

@@ -69,33 +69,19 @@ fn require_allowed(sandbox: &Sandbox, path: &Path) -> Result<PathBuf, String> {
     if !sandbox.allows(&abs) {
         return Err(format!("この場所にはアクセスできません: {}", abs.display()));
     }
-    if abs.exists() {
-        let canon = fs::canonicalize(&abs)
-            .map_err(|e| format!("パスを解決できません: {} ({})", abs.display(), io_ja(e)))?;
-        if !sandbox.allows(&canon) {
-            return Err(format!(
-                "この場所にはアクセスできません: {}",
-                canon.display()
-            ));
-        }
-        return Ok(canon);
+    let resolved = if abs.exists() {
+        fs::canonicalize(&abs)
+            .map_err(|e| format!("パスを解決できません: {} ({})", abs.display(), io_ja(e)))?
+    } else {
+        zipcore::resolve_path(&abs)
+    };
+    if !sandbox.allows(&resolved) {
+        return Err(format!(
+            "この場所にはアクセスできません: {}",
+            resolved.display()
+        ));
     }
-    if let Some(parent) = abs.parent() {
-        if parent.exists() {
-            let canon_parent = fs::canonicalize(parent)
-                .map_err(|e| format!("保存先フォルダを解決できません: {}", io_ja(e)))?;
-            if !sandbox.allows(&canon_parent) {
-                return Err(format!(
-                    "この場所にはアクセスできません: {}",
-                    canon_parent.display()
-                ));
-            }
-            if let Some(name) = abs.file_name() {
-                return Ok(canon_parent.join(name));
-            }
-        }
-    }
-    Ok(abs)
+    Ok(resolved)
 }
 
 fn io_ja(err: std::io::Error) -> String {

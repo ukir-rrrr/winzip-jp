@@ -18,7 +18,7 @@ pub use encoding::{
     Unmappable, UnmappableKind, COMPAT_IDEOGRAPH_REPLACEMENTS, EFS_UTF8_BIT, UNICODE_PATH_EXTRA_ID,
 };
 pub use error::ZipcoreError;
-pub use fsutil::{absolute, atomic_replace, path_eq, stays_under};
+pub use fsutil::{absolute, atomic_replace, path_eq, resolve_existing, resolve_path, stays_under};
 pub use job::{Progress, ProgressPhase, SecretString};
 pub use read::{
     extract_zip, list_zip, ExtractReport, ExtractRequest, ListReport, ListRequest, ListedEntry,
