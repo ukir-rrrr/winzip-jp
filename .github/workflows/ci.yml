@@ -27,6 +27,21 @@ jobs:
       - name: Test zipcore
         run: cargo test -p zipcore --all-features
 
+  windows-oracle:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install 7-Zip
+        run: choco install 7zip -y
+      - name: Golden ZIP + 7-Zip CP932 oracle
+        run: cargo test -p zipcore --test golden -- --ignored --nocapture
+      # Expand-Archive / tar / Shell.Application は windows-extract.ps1 内の
+      # 補助レポート。失敗してもジョブは落とさない。
+      # Expand-Archive が日本語を正しく展開した場合は bit 11 誤爆の疑い。
+
   ui-e2e:
     runs-on: macos-15
     timeout-minutes: 45

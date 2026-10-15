@@ -4,11 +4,15 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "CP932 向け ZIP のエンコーディング・作成・解凍・分割（実装は PR 1 以降）"
+description = "CP932 向け ZIP のエンコーディング・作成・解凍・分割（PR 2 は作成）"
 
 [dependencies]
 crc32fast = "1"
 encoding_rs = "0.8"
+flate2 = "1"
 serde = { version = "1", features = ["derive"] }
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
+
+[dev-dependencies]
+serde_json = "1"

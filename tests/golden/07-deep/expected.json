@@ -1,0 +1,48 @@
+{
+  "replacements": {},
+  "excluded": [],
+  "entries": [
+    {
+      "name_nfc": "a/",
+      "name_hex": "612F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "a/b/",
+      "name_hex": "612F622F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "a/b/c/",
+      "name_hex": "612F622F632F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "a/b/c/d/",
+      "name_hex": "612F622F632F642F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "a/b/c/d/e/",
+      "name_hex": "612F622F632F642F652F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "a/b/c/d/e/深い/",
+      "name_hex": "612F622F632F642F652F905B82A22F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "a/b/c/d/e/深い/file.txt",
+      "name_hex": "612F622F632F642F652F905B82A22F66696C652E747874",
+      "gpbf": 0,
+      "method": 8
+    }
+  ]
+}

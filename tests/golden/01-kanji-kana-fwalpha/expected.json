@@ -1,0 +1,30 @@
+{
+  "replacements": {},
+  "excluded": [],
+  "entries": [
+    {
+      "name_nfc": "書類/",
+      "name_hex": "8F9197DE2F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "書類/こんにちは.txt",
+      "name_hex": "8F9197DE2F82B182F182C982BF82CD2E747874",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "ＡＢＣ.txt",
+      "name_hex": "8260826182622E747874",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "漢字かな.txt",
+      "name_hex": "8ABF8E9A82A982C82E747874",
+      "gpbf": 0,
+      "method": 8
+    }
+  ]
+}

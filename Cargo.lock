@@ -4351,7 +4351,9 @@ version = "0.1.0"
 dependencies = [
  "crc32fast",
  "encoding_rs",
+ "flate2",
  "serde",
+ "serde_json",
  "unicode-normalization",
  "unicode-segmentation",
 ]

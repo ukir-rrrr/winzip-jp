@@ -1,0 +1,28 @@
+{
+  "replacements": {
+    "髙.png": "高.png",
+    "﨑.txt": "崎.txt",
+    "写真🎉.jpg": "写真_.jpg"
+  },
+  "excluded": [],
+  "entries": [
+    {
+      "name_nfc": "高.png",
+      "name_hex": "8D822E706E67",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "崎.txt",
+      "name_hex": "8DE82E747874",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "写真_.jpg",
+      "name_hex": "8ECA905E5F2E6A7067",
+      "gpbf": 0,
+      "method": 8
+    }
+  ]
+}
