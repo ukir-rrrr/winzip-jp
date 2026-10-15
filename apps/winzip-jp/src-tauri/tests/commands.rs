@@ -484,6 +484,32 @@ fn create_rejects_split_sibling_as_input() {
 }
 
 #[test]
+fn create_rejects_split_sibling_ascii_case() {
+    let root = unique_dir("overlap-z-case");
+    let z01 = root.join("out.z01");
+    fs::write(&z01, b"old piece").unwrap();
+    let dest = root.join("OUT.zip");
+    let mut sandbox = Sandbox::new();
+    sandbox.grant(&z01);
+    sandbox.grant_save_dest(&dest);
+    let err = create_archive_direct(
+        &sandbox,
+        CreateDto {
+            paths: vec![z01.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+            ..Default::default()
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("出力先が入力"), "{err}");
+    assert_eq!(fs::read(&z01).unwrap(), b"old piece");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn dest_inside_input_dir_is_rejected() {
     let root = unique_dir("dest-overlap");
     let src_dir = root.join("in");

@@ -75,10 +75,15 @@ pub fn is_split_sibling(dest_zip: &Path, candidate: &Path) -> bool {
     let Some(name) = cand_name.to_str() else {
         return false;
     };
-    let prefix = format!("{stem_str}.");
-    let Some(ext) = name.strip_prefix(&prefix) else {
+    // discard_stale_volumes は path_eq（ASCII 大小無視）で消す。
+    // 重なり判定も同じ折り畳みに揃えないと、OUT.zip 隣の out.z01 が入力として通り、
+    // 掃除で消える。
+    let Some((cand_stem, ext)) = name.rsplit_once('.') else {
         return false;
     };
+    if !cand_stem.eq_ignore_ascii_case(stem_str) {
+        return false;
+    }
     let ext = ext.to_ascii_lowercase();
     ext.starts_with('z') && is_z_digits(&ext[1..])
 }
@@ -631,6 +636,16 @@ mod tests {
         assert!(!is_split_sibling(dest, Path::new("/tmp/out.txt")));
         assert!(!is_split_sibling(dest, Path::new("/tmp/out.z01.exe")));
         assert!(!is_split_sibling(dest, Path::new("/other/out.z01")));
+        assert!(!is_split_sibling(dest, Path::new("/tmp/other.z01")));
+    }
+
+    #[test]
+    fn sibling_ignores_ascii_case() {
+        let dest = Path::new("/tmp/OUT.zip");
+        assert!(is_split_sibling(dest, Path::new("/tmp/out.z01")));
+        assert!(is_split_sibling(dest, Path::new("/tmp/Out.Z12")));
+        assert!(!is_split_sibling(dest, Path::new("/tmp/out.zip")));
+        assert!(!is_split_sibling(dest, dest));
         assert!(!is_split_sibling(dest, Path::new("/tmp/other.z01")));
     }
 
