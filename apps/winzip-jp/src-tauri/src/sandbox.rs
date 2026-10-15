@@ -286,6 +286,16 @@ fn publish_across_volumes_inner(
     }
     match copy_tmp_to_dest(tmp, dest) {
         Ok(_) => {
+            if let Err(e) = sync_file(dest) {
+                discard_tmp(tmp);
+                if let Some(bak) = backup {
+                    return Err(io::Error::new(
+                        e.kind(),
+                        format!("{RESTORE_BACKUP_HINT}{}", bak.display()),
+                    ));
+                }
+                return Err(e);
+            }
             discard_tmp(tmp);
             if let Some(bak) = backup {
                 let _ = fs::remove_file(bak);
@@ -322,6 +332,10 @@ fn copy_tmp_to_dest(tmp: &Path, dest: &Path) -> io::Result<u64> {
         ));
     }
     fs::copy(tmp, dest)
+}
+
+fn sync_file(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
 }
 
 fn restore_or_keep_backup(bak: &Path, dest: &Path) -> bool {
