@@ -399,6 +399,71 @@ fn dest_inside_input_dir_is_rejected() {
 }
 
 #[test]
+fn dest_with_dotdot_inside_input_is_rejected() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("a.txt"), b"a");
+    let dest = tmp
+        .path()
+        .join("other")
+        .join("..")
+        .join("src")
+        .join("out.zip");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src,
+            as_dir: true,
+        }],
+        dest,
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    let err = write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_err();
+    assert!(matches!(err, ZipcoreError::DestOverlapsInput { .. }));
+}
+
+#[test]
+fn cancel_does_not_delete_existing_dest() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("a.txt"), b"payload-that-is-not-tiny-xxxxxxxx");
+    let dest = tmp.path().join("keep.zip");
+    fs::write(&dest, b"EXISTING").unwrap();
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src.join("a.txt"),
+            as_dir: false,
+        }],
+        dest: dest.clone(),
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    let cancel = AtomicBool::new(false);
+    let err = write_zip(
+        req,
+        |p| {
+            if p.phase == ProgressPhase::Writing {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        },
+        &cancel,
+    )
+    .unwrap_err();
+    assert!(matches!(err, ZipcoreError::Cancelled));
+    assert_eq!(fs::read(&dest).unwrap(), b"EXISTING");
+    let partial = {
+        let mut n = dest.as_os_str().to_os_string();
+        n.push(".partial");
+        PathBuf::from(n)
+    };
+    assert!(!partial.exists());
+}
+
+#[test]
 fn path_dotdot_from_encode_never_lands_in_zip_name() {
     let encoded = encode_entry_name("foo/../bar.txt");
     assert_eq!(encoded.cp932, b"foo/_/bar.txt");

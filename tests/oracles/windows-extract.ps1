@@ -95,19 +95,23 @@ function Report-OptionalExtract {
                 $got += $rel
             }
         }
-        $wantSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$want)
         $gotSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$got)
-        $japaneseOk = $true
-        foreach ($n in $want) {
-            if ($n -match '[^\x00-\x7F]' -and -not $gotSet.Contains($n)) {
-                $japaneseOk = $false
-                break
-            }
-        }
-        if ($japaneseOk -and ($wantSet.SetEquals($gotSet))) {
-            Write-Host "WARNING: $Label が日本語を正しく展開した。bit 11 が誤って立っている可能性がある（本製品では失敗を意味しうる）。"
+        $nonAscii = @($want | Where-Object { $_ -match '[^\x00-\x7F]' })
+        if ($nonAscii.Count -eq 0) {
+            Write-Host "$Label : ASCII のみなので bit 11 スモークの対象外。"
         } else {
-            Write-Host "$Label : 日本語は UTF-8 として正しく展開されていない（bit 11 が落ちているスモークとしては期待どおり）。"
+            $japaneseOk = $true
+            foreach ($n in $nonAscii) {
+                if (-not $gotSet.Contains($n)) {
+                    $japaneseOk = $false
+                    break
+                }
+            }
+            if ($japaneseOk) {
+                Write-Host "WARNING: $Label が日本語を正しく展開した。bit 11 が誤って立っている可能性がある（本製品では失敗を意味しうる）。"
+            } else {
+                Write-Host "$Label : 日本語は UTF-8 として正しく展開されていない（bit 11 が落ちているスモークとしては期待どおり）。"
+            }
         }
         Write-Host "  got: $($got -join ', ')"
     } catch {

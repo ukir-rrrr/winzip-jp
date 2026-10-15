@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use flate2::write::DeflateEncoder;
@@ -163,31 +163,23 @@ pub fn write_zip(
             reason: "エントリ数が 65535 を超えています".into(),
         });
     }
-    if dest_overlaps_input(&req.dest, &req.inputs) {
+    if dest_overlaps_input(&req.dest, &req.inputs, &plan) {
         return Err(ZipcoreError::DestOverlapsInput {
             dest: req.dest.clone(),
         });
     }
 
     let dest = req.dest.clone();
-    let result = write_plan_to_path(&plan, &dest, &mut progress, cancel);
-    match result {
-        Ok(report) => {
-            progress(Progress {
-                phase: ProgressPhase::Done,
-                current_entry: None,
-                entries_done: report.entries_written,
-                entries_total: report.entries_written,
-                bytes_done: report.bytes_written,
-                bytes_total: report.bytes_written,
-            });
-            Ok(report)
-        }
-        Err(e) => {
-            let _ = fs::remove_file(&dest);
-            Err(e)
-        }
-    }
+    let report = write_plan_to_path(&plan, &dest, &mut progress, cancel)?;
+    progress(Progress {
+        phase: ProgressPhase::Done,
+        current_entry: None,
+        entries_done: report.entries_written,
+        entries_total: report.entries_written,
+        bytes_done: report.bytes_written,
+        bytes_total: report.bytes_written,
+    });
+    Ok(report)
 }
 
 fn write_plan_to_path(
@@ -196,7 +188,28 @@ fn write_plan_to_path(
     progress: &mut impl FnMut(Progress),
     cancel: &AtomicBool,
 ) -> Result<WriteReport, ZipcoreError> {
-    let mut out = File::create(dest)?;
+    let partial = partial_path(dest);
+    let result = write_plan_to_partial(plan, dest, &partial, progress, cancel);
+    match result {
+        Ok(report) => {
+            replace_file(&partial, dest)?;
+            Ok(report)
+        }
+        Err(e) => {
+            let _ = fs::remove_file(&partial);
+            Err(e)
+        }
+    }
+}
+
+fn write_plan_to_partial(
+    plan: &Plan,
+    dest: &Path,
+    partial: &Path,
+    progress: &mut impl FnMut(Progress),
+    cancel: &AtomicBool,
+) -> Result<WriteReport, ZipcoreError> {
+    let mut out = File::create(partial)?;
     let mut centrals = Vec::with_capacity(plan.entries.len());
     let mut entries_done = 0u32;
     let mut bytes_done = 0u64;
@@ -626,12 +639,92 @@ fn check_cancel(cancel: &AtomicBool) -> Result<(), ZipcoreError> {
     }
 }
 
-fn dest_overlaps_input(dest: &Path, inputs: &[InputItem]) -> bool {
-    let dest = absolute(dest);
+fn dest_overlaps_input(dest: &Path, inputs: &[InputItem], plan: &Plan) -> bool {
+    let dest = resolve_dest(dest);
     inputs.iter().any(|item| {
-        let input = absolute(&item.abs_path);
-        dest == input || (item.as_dir && dest.starts_with(&input))
-    })
+        let input = resolve_existing(&item.abs_path);
+        path_eq(&dest, &input) || (item.as_dir && path_under(&dest, &input))
+    }) || plan
+        .entries
+        .iter()
+        .any(|e| path_eq(&dest, &resolve_existing(&e.source)))
+}
+
+fn partial_path(dest: &Path) -> PathBuf {
+    let mut name = dest.as_os_str().to_os_string();
+    name.push(".partial");
+    PathBuf::from(name)
+}
+
+fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
+    match fs::rename(from, to) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            if to.exists() {
+                fs::remove_file(to)?;
+            }
+            match fs::rename(from, to) {
+                Ok(()) => Ok(()),
+                Err(_) => {
+                    fs::copy(from, to)?;
+                    fs::remove_file(from)?;
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+fn resolve_dest(path: &Path) -> PathBuf {
+    let abs = normalize_lexically(&absolute(path));
+    if let Ok(c) = fs::canonicalize(&abs) {
+        return c;
+    }
+    if let Some(parent) = abs.parent() {
+        if let Ok(pc) = fs::canonicalize(parent) {
+            if let Some(name) = abs.file_name() {
+                return pc.join(name);
+            }
+        }
+    }
+    abs
+}
+
+fn resolve_existing(path: &Path) -> PathBuf {
+    let abs = normalize_lexically(&absolute(path));
+    fs::canonicalize(&abs).unwrap_or(abs)
+}
+
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn path_eq(a: &Path, b: &Path) -> bool {
+    a == b || a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
+}
+
+fn path_under(child: &Path, parent: &Path) -> bool {
+    if child.starts_with(parent) {
+        return true;
+    }
+    let child_s = child.to_string_lossy();
+    let parent_s = parent.to_string_lossy();
+    let child_l = child_s.to_lowercase();
+    let parent_l = parent_s.to_lowercase();
+    if child_l == parent_l {
+        return true;
+    }
+    child_l.starts_with(&format!("{parent_l}/")) || child_l.starts_with(&format!("{parent_l}\\"))
 }
 
 fn absolute(path: &Path) -> PathBuf {

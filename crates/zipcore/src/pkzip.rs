@@ -8,6 +8,8 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chrono::{Datelike, Timelike};
+
 use crate::encoding::{EFS_UTF8_BIT, UNICODE_PATH_EXTRA_ID};
 use crate::error::ZipcoreError;
 
@@ -154,12 +156,22 @@ pub fn write_eocd<W: Write>(
 }
 
 pub fn msdos_datetime(ts: SystemTime) -> (u16, u16) {
-    let Ok(dur) = ts.duration_since(UNIX_EPOCH) else {
+    // APPNOTE の DOS 時刻はローカル時。UTC で詰めると Windows 側が時差ぶんずれる。
+    if ts < UNIX_EPOCH {
         return (0, dos_date_1980_01_01());
-    };
-    let Some((year, month, day, hour, min, sec)) = unix_utc_ymdhms(dur.as_secs()) else {
-        return (0, dos_date_1980_01_01());
-    };
+    }
+    let local = chrono::DateTime::<chrono::Local>::from(ts);
+    pack_msdos(
+        local.year(),
+        local.month(),
+        local.day(),
+        local.hour(),
+        local.minute(),
+        local.second(),
+    )
+}
+
+pub fn pack_msdos(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32) -> (u16, u16) {
     if year < 1980 {
         return (0, dos_date_1980_01_01());
     }
@@ -171,30 +183,6 @@ pub fn msdos_datetime(ts: SystemTime) -> (u16, u16) {
 
 fn dos_date_1980_01_01() -> u16 {
     (1 << 5) | 1
-}
-
-/// Howard Hinnant の civil_from_days。UTC。
-fn unix_utc_ymdhms(unix: u64) -> Option<(i32, u32, u32, u32, u32, u32)> {
-    let sec_of_day = (unix % 86400) as u32;
-    let days = (unix / 86400) as i64;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = (z - era * 146_097) as u32;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe as i32 + era as i32 * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    Some((
-        y,
-        m,
-        d,
-        sec_of_day / 3600,
-        (sec_of_day % 3600) / 60,
-        sec_of_day % 60,
-    ))
 }
 
 pub fn inspect_zip(path: &Path) -> Result<Vec<InspectedEntry>, ZipcoreError> {
@@ -343,6 +331,7 @@ pub fn extra_has_id(extra: &[u8], id: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Datelike, Timelike};
 
     #[test]
     fn gpbf_plain_never_sets_efs_or_encrypt() {
@@ -350,6 +339,22 @@ mod tests {
         assert_eq!(GPBF_PLAIN & 1, 0);
         assert_eq!(HOST_OS_MSDOS, 0);
         assert_eq!(VERSION_MADE_BY >> 8, HOST_OS_MSDOS as u16);
+    }
+
+    #[test]
+    fn dos_time_matches_local_civil_time() {
+        let ts = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let (time, date) = msdos_datetime(ts);
+        let local = chrono::DateTime::<chrono::Local>::from(ts);
+        let (want_time, want_date) = pack_msdos(
+            local.year(),
+            local.month(),
+            local.day(),
+            local.hour(),
+            local.minute(),
+            local.second(),
+        );
+        assert_eq!((time, date), (want_time, want_date));
     }
 
     #[test]
