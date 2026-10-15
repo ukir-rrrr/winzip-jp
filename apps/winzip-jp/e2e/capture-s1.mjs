@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = resolve(appRoot, "e2e/artifacts");
 const outFile = resolve(outDir, process.env.S1_OUT_NAME ?? "s1.png");
+const s4File = resolve(outDir, process.env.S4_OUT_NAME ?? "s4-draft.png");
 const url = process.env.S1_URL ?? "http://127.0.0.1:4173/";
+const s4Url = process.env.S4_URL ?? "http://127.0.0.1:4173/?s4=1";
 mkdirSync(outDir, { recursive: true });
 
 function waitForHttp(target, timeoutMs = 30000) {
@@ -84,7 +86,7 @@ function startPreviewIfNeeded() {
   });
 }
 
-function screenshotWithChrome(chromePath) {
+function screenshotWithChrome(chromePath, targetUrl, dest) {
   const result = spawnSync(
     chromePath,
     [
@@ -94,8 +96,8 @@ function screenshotWithChrome(chromePath) {
       "--hide-scrollbars",
       "--force-device-scale-factor=1",
       "--window-size=800,600",
-      `--screenshot=${outFile}`,
-      url,
+      `--screenshot=${dest}`,
+      targetUrl,
     ],
     { stdio: "inherit" },
   );
@@ -116,6 +118,9 @@ async function screenshotWithPlaywright() {
       const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
       await page.goto(process.env.S1_URL, { waitUntil: 'networkidle' });
       await page.screenshot({ path: process.env.S1_OUT, type: 'png' });
+      await page.goto(process.env.S4_URL, { waitUntil: 'networkidle' });
+      await page.locator('[data-testid="progress-text"]').waitFor();
+      await page.screenshot({ path: process.env.S4_OUT, type: 'png' });
       await browser.close();
     })().catch((err) => {
       console.error(err);
@@ -124,7 +129,7 @@ async function screenshotWithPlaywright() {
   `;
   const result = spawnSync("npx", ["--yes", "-p", "playwright", "node", "-e", script], {
     stdio: "inherit",
-    env: { ...process.env, S1_URL: url, S1_OUT: outFile },
+    env: { ...process.env, S1_URL: url, S1_OUT: outFile, S4_URL: s4Url, S4_OUT: s4File },
   });
   if (result.status !== 0) {
     throw new Error("Playwright のスクリーンショットに失敗しました");
@@ -136,14 +141,19 @@ try {
   await waitForHttp(url);
   const chrome = findChrome();
   if (chrome) {
-    screenshotWithChrome(chrome);
+    screenshotWithChrome(chrome, url, outFile);
+    screenshotWithChrome(chrome, s4Url, s4File);
   } else {
     await screenshotWithPlaywright();
   }
   if (!existsSync(outFile)) {
     throw new Error(`スクリーンショットが書き出されませんでした: ${outFile}`);
   }
+  if (!existsSync(s4File)) {
+    throw new Error(`スクリーンショットが書き出されませんでした: ${s4File}`);
+  }
   console.log(`wrote ${outFile}`);
+  console.log(`wrote ${s4File}`);
 } finally {
   if (preview) {
     preview.kill("SIGTERM");

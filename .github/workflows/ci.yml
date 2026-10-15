@@ -53,6 +53,20 @@ jobs:
       # 補助レポート。失敗してもジョブは落とさない。
       # Expand-Archive が日本語を正しく展開した場合は bit 11 誤爆の疑い。
 
+  tauri-sandbox:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            apps/winzip-jp/src-tauri -> apps/winzip-jp/src-tauri/target
+      - name: Test Tauri commands and sandbox policy
+        run: cargo test -p winzip-jp
+
   ui-e2e:
     runs-on: macos-15
     timeout-minutes: 45

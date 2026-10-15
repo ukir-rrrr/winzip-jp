@@ -139,8 +139,54 @@ body,
   line-height: 1.55;
 }
 
+[data-ui] .cmd-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+[data-ui] .cmd-btn {
+  min-width: 96px;
+  height: 36px;
+  padding: 0 18px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+[data-ui] .cmd-btn-quiet {
+  background: var(--app-toolbar);
+  color: var(--app-ink);
+}
+
+[data-ui] .cmd-btn:active {
+  transform: scale(0.98);
+}
+
+[data-ui] .progress-text,
+[data-ui] .status-text {
+  margin: 0;
+  max-width: 28em;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+[data-ui] .progress-text {
+  color: var(--app-ink);
+}
+
+[data-ui] .status-text {
+  color: var(--app-muted);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  [data-ui] .mode-tab {
+  [data-ui] .mode-tab,
+  [data-ui] .cmd-btn {
     transition: none;
+  }
+
+  [data-ui] .cmd-btn:active {
+    transform: none;
   }
 }

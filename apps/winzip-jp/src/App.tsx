@@ -1,8 +1,17 @@
-import { useState } from "react";
-import { Box, Title, UnstyledButton } from "@mantine/core";
+import { useEffect, useMemo, useState } from "react";
+import { Box, Button, Text, Title, UnstyledButton } from "@mantine/core";
 import "./App.css";
 
 type Mode = "create" | "extract";
+
+type ProgressDto = {
+  phase: "starting" | "writing" | "finishing" | "done";
+  currentEntry: string | null;
+  entriesDone: number;
+  entriesTotal: number;
+  bytesDone: number;
+  bytesTotal: number;
+};
 
 function ArchiveMark({ mode }: { mode: Mode }) {
   return (
@@ -23,9 +32,213 @@ function ArchiveMark({ mode }: { mode: Mode }) {
   );
 }
 
+function hasTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function isS4Draft(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return new URLSearchParams(window.location.search).get("s4") === "1";
+}
+
+function progressLabel(progress: ProgressDto | null): string {
+  if (!progress) {
+    return "進捗はまだありません";
+  }
+  const phase =
+    progress.phase === "starting"
+      ? "開始しています"
+      : progress.phase === "writing"
+        ? "書き込み中"
+        : progress.phase === "finishing"
+          ? "仕上げています"
+          : "完了";
+  if (progress.currentEntry) {
+    return `${phase} ${progress.currentEntry}`;
+  }
+  return phase;
+}
+
+async function invokeCommand<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<T>(cmd, args);
+}
+
 export default function App() {
   const [mode, setMode] = useState<Mode>("create");
+  const [dropped, setDropped] = useState<string[]>([]);
+  const [progress, setProgress] = useState<ProgressDto | null>(null);
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
   const isCreate = mode === "create";
+
+  useEffect(() => {
+    if (isS4Draft() && !hasTauri()) {
+      setProgress({
+        phase: "starting",
+        currentEntry: null,
+        entriesDone: 0,
+        entriesTotal: 0,
+        bytesDone: 0,
+        bytesTotal: 0,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasTauri()) {
+      return;
+    }
+    let cancelled = false;
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenDrop: (() => void) | undefined;
+    let unlistenWindow: (() => void) | undefined;
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+      if (cancelled) {
+        return;
+      }
+      unlistenProgress = await listen<ProgressDto>("zip://progress", (event) => {
+        setProgress(event.payload);
+      });
+      unlistenDrop = await listen<string[]>("zip://dropped", (event) => {
+        setDropped(event.payload);
+        setStatus(`${event.payload.length} 件を受け取りました`);
+      });
+      unlistenWindow = await getCurrentWebview().onDragDropEvent((event) => {
+        if (event.payload.type === "drop") {
+          const paths = event.payload.paths;
+          setDropped(paths);
+          void invokeCommand("accept_dropped_paths", { paths });
+        }
+      });
+    })().catch(() => {
+      // プレビューでは Tauri が無い
+    });
+    return () => {
+      cancelled = true;
+      unlistenProgress?.();
+      unlistenDrop?.();
+      unlistenWindow?.();
+    };
+  }, []);
+
+  const draftStarting = useMemo<ProgressDto>(
+    () => ({
+      phase: "starting",
+      currentEntry: null,
+      entriesDone: 0,
+      entriesTotal: 0,
+      bytesDone: 0,
+      bytesTotal: 0,
+    }),
+    [],
+  );
+
+  async function onCreate() {
+    if (!hasTauri()) {
+      if (isS4Draft()) {
+        setProgress(draftStarting);
+        setStatus("開始しています");
+      } else {
+        setStatus("この画面では作成できません");
+      }
+      return;
+    }
+    setBusy(true);
+    setStatus("");
+    try {
+      let paths = dropped;
+      if (paths.length === 0) {
+        paths = await invokeCommand<string[]>("pick_files");
+        setDropped(paths);
+      }
+      if (paths.length === 0) {
+        setStatus("ファイルが選ばれていません");
+        return;
+      }
+      const dest = await invokeCommand<string | null>("pick_save_zip", {
+        defaultName: "archive.zip",
+      });
+      if (!dest) {
+        setStatus("保存先が選ばれていません");
+        return;
+      }
+      await invokeCommand("create_archive", {
+        req: { paths, replacements: {} },
+        dest,
+      });
+      setStatus("作成しました");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onList() {
+    if (!hasTauri()) {
+      setStatus("この画面では一覧できません");
+      return;
+    }
+    setBusy(true);
+    try {
+      let path = dropped.find((p) => p.toLowerCase().endsWith(".zip"));
+      if (!path) {
+        const files = await invokeCommand<string[]>("pick_files");
+        path = files.find((p) => p.toLowerCase().endsWith(".zip")) ?? files[0];
+      }
+      if (!path) {
+        setStatus("ZIP が選ばれていません");
+        return;
+      }
+      const report = await invokeCommand<{
+        entries: { displayName: string }[];
+        encoding: string;
+      }>("list_archive", { path, encoding: null });
+      const names = report.entries.map((e) => e.displayName).join("、");
+      setStatus(names || "エントリがありません");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onExtract() {
+    if (!hasTauri()) {
+      setStatus("この画面では解凍できません");
+      return;
+    }
+    setBusy(true);
+    try {
+      let archive = dropped.find((p) => p.toLowerCase().endsWith(".zip"));
+      if (!archive) {
+        const files = await invokeCommand<string[]>("pick_files");
+        archive = files.find((p) => p.toLowerCase().endsWith(".zip")) ?? files[0];
+      }
+      if (!archive) {
+        setStatus("ZIP が選ばれていません");
+        return;
+      }
+      const dest = await invokeCommand<string | null>("pick_extract_dir");
+      if (!dest) {
+        setStatus("展開先が選ばれていません");
+        return;
+      }
+      await invokeCommand("extract_archive", {
+        req: { archive, dest, encoding: null, overwrite: false },
+      });
+      setStatus("解凍しました");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <Box className="shell" data-ui>
@@ -93,6 +306,49 @@ export default function App() {
                 </>
               )}
             </p>
+            <div className="cmd-row">
+              <Button
+                type="button"
+                className="cmd-btn"
+                data-testid="btn-create"
+                variant="filled"
+                color="macos"
+                disabled={busy}
+                onClick={() => void onCreate()}
+              >
+                作成
+              </Button>
+              <Button
+                type="button"
+                className="cmd-btn cmd-btn-quiet"
+                data-testid="btn-list"
+                variant="subtle"
+                color="macos"
+                disabled={busy}
+                onClick={() => void onList()}
+              >
+                一覧
+              </Button>
+              <Button
+                type="button"
+                className="cmd-btn cmd-btn-quiet"
+                data-testid="btn-extract"
+                variant="subtle"
+                color="macos"
+                disabled={busy}
+                onClick={() => void onExtract()}
+              >
+                解凍
+              </Button>
+            </div>
+            <Text className="progress-text" data-testid="progress-text">
+              {progressLabel(progress)}
+            </Text>
+            {status ? (
+              <Text className="status-text" data-testid="status-text">
+                {status}
+              </Text>
+            ) : null}
           </div>
         </section>
       </Box>
