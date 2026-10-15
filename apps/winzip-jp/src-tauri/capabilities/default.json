@@ -3,13 +3,5 @@
   "identifier": "default",
   "description": "メインウィンドウの既定 capability",
   "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "dialog:default",
-    "fs:default",
-    {
-      "identifier": "fs:scope",
-      "allow": [{ "path": "$TEMP/**" }]
-    }
-  ]
+  "permissions": ["core:default", "dialog:default"]
 }

@@ -249,19 +249,21 @@ fn admit(
     state: &AppState,
     paths: &[PathBuf],
     kind: GrantKind,
-) -> Result<(), String> {
+) -> Result<Vec<PathBuf>, String> {
     let mut sandbox = lock_sandbox(&state.sandbox)?;
-    match kind {
-        GrantKind::Selected => sandbox.grant_many(paths),
-        GrantKind::SaveDest => {
-            for path in paths {
-                sandbox.grant_save_dest(path);
-            }
+    let mut kept = Vec::new();
+    for path in paths {
+        let ok = match kind {
+            GrantKind::Selected => sandbox.grant(path),
+            GrantKind::SaveDest => sandbox.grant_save_dest(path),
+        };
+        if ok {
+            kept.push(path.clone());
         }
     }
     drop(sandbox);
-    extend_fs_scope(app, paths);
-    Ok(())
+    extend_fs_scope(app, &kept);
+    Ok(kept)
 }
 
 fn file_path_to_buf(path: tauri_plugin_dialog::FilePath) -> Result<PathBuf, String> {
@@ -365,8 +367,8 @@ pub async fn pick_files(
     for file in files {
         paths.push(file_path_to_buf(file)?);
     }
-    admit(&app, &state, &paths, GrantKind::Selected)?;
-    Ok(paths
+    let kept = admit(&app, &state, &paths, GrantKind::Selected)?;
+    Ok(kept
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect())
@@ -397,8 +399,8 @@ pub async fn pick_save_zip(
         return Ok(None);
     };
     let path = file_path_to_buf(file)?;
-    admit(&app, &state, &[path.clone()], GrantKind::SaveDest)?;
-    Ok(Some(path.to_string_lossy().into_owned()))
+    let kept = admit(&app, &state, &[path], GrantKind::SaveDest)?;
+    Ok(kept.first().map(|p| p.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -416,16 +418,16 @@ pub async fn pick_extract_dir(
         return Ok(None);
     };
     let path = file_path_to_buf(folder)?;
-    admit(&app, &state, &[path.clone()], GrantKind::Selected)?;
-    Ok(Some(path.to_string_lossy().into_owned()))
+    let kept = admit(&app, &state, &[path], GrantKind::Selected)?;
+    Ok(kept.first().map(|p| p.to_string_lossy().into_owned()))
 }
 
 pub fn grant_dropped(state: &AppState, app: &tauri::AppHandle, paths: &[PathBuf]) -> Vec<String> {
-    if admit(app, state, paths, GrantKind::Selected).is_err() {
-        return Vec::new();
+    match admit(app, state, paths, GrantKind::Selected) {
+        Ok(kept) => kept
+            .into_iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => Vec::new(),
     }
-    paths
-        .iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect()
 }

@@ -98,27 +98,36 @@ impl Sandbox {
     }
 
     /// ダイアログ / ドロップで選んだ入力。ディレクトリなら配下も許可。
-    pub fn grant(&mut self, path: &Path) {
+    /// シンボリックリンク自体は拒否し、リンク先ツリーを開かない。
+    pub fn grant(&mut self, path: &Path) -> bool {
         let abs = absolute(path);
+        if is_symlink(&abs) {
+            return false;
+        }
         let stored = resolve_path(&abs);
         let recursive = stored.is_dir() || abs.is_dir();
         self.insert(abs, stored, recursive);
+        true
     }
 
     pub fn grant_many<P: AsRef<Path>>(&mut self, paths: impl IntoIterator<Item = P>) {
         for path in paths {
-            self.grant(path.as_ref());
+            let _ = self.grant(path.as_ref());
         }
     }
 
     /// 保存先 ZIP。ファイルだけ許可し、親フォルダはカーネル許可のみ。
-    pub fn grant_save_dest(&mut self, path: &Path) {
+    pub fn grant_save_dest(&mut self, path: &Path) -> bool {
         let abs = absolute(path);
+        if is_symlink(&abs) {
+            return false;
+        }
         let stored = resolve_path(&abs);
         self.insert(abs.clone(), stored, false);
         if let Some(parent) = abs.parent() {
             self.hold_kernel(parent, true);
         }
+        true
     }
 
     fn insert(&mut self, original: PathBuf, stored: PathBuf, recursive: bool) {
@@ -197,6 +206,12 @@ impl Sandbox {
             kernel_holds: Vec::new(),
         }
     }
+}
+
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
 }
 
 pub fn container_tmp_zip() -> PathBuf {
@@ -283,7 +298,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn grant_via_symlink_allows_canonical_and_pending_dest() {
+    fn dropped_symlink_does_not_grant_target_tree() {
         let root = std::env::temp_dir().join(format!(
             "wzjp-scope-{}-{}",
             std::process::id(),
@@ -296,20 +311,20 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let real = root.join("real");
         fs::create_dir_all(&real).unwrap();
+        let file = real.join("x.txt");
+        fs::write(&file, b"x").unwrap();
         let alias = root.join("alias");
         std::os::unix::fs::symlink(&real, &alias).unwrap();
 
         let mut sandbox = Sandbox::new();
-        sandbox.grant(&alias);
-        let file = real.join("x.txt");
-        fs::write(&file, b"x").unwrap();
+        assert!(!sandbox.grant(&alias));
+        assert!(!sandbox.allows(&file));
+        assert!(!sandbox.allows(&alias.join("x.txt")));
+        assert!(sandbox.grant(&real));
         assert!(sandbox.allows(&file));
-        assert!(sandbox.allows(&alias.join("x.txt")));
-        let dest = alias.join("out.zip");
-        sandbox.grant(&dest);
+        let dest = real.join("out.zip");
+        assert!(sandbox.grant_save_dest(&dest));
         assert!(sandbox.allows(&dest));
-        let canon_real = fs::canonicalize(&real).unwrap();
-        assert!(sandbox.allows(&canon_real.join("out.zip")));
         assert!(!sandbox.allows(&root.join("outside.txt")));
         let _ = fs::remove_dir_all(&root);
     }

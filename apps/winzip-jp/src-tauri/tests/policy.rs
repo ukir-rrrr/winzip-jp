@@ -126,6 +126,13 @@ fn fs_scope_does_not_include_home() {
             "{} に downloads.read-write がある",
             path.display()
         );
+        if path.file_name().is_some_and(|n| n == "default.json") {
+            assert!(
+                !text.contains("$TEMP/**") && !text.contains("fs:default") && !text.contains("fs:scope"),
+                "{} に静的な fs スコープがある",
+                path.display()
+            );
+        }
     }
 }
 
