@@ -95,6 +95,13 @@ describe("isValidReplacement", () => {
     assert.equal(isValidReplacement("高.png"), true);
   });
 
+  it("accepts CP932 symbols that sit in the misc-symbols block", () => {
+    assert.equal(isValidReplacement("★.png"), true);
+    assert.equal(isValidReplacement("☆.png"), true);
+    assert.equal(isValidReplacement("♀.png"), true);
+    assert.equal(isValidReplacement("♂.png"), true);
+  });
+
   it("accepts a relative full name", () => {
     assert.equal(isValidReplacement("高.png"), true);
     assert.equal(isValidReplacement("dir/高.png"), true);
