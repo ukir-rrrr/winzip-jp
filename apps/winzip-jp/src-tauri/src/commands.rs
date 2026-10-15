@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Emitter;
 use zipcore::{
-    extract_zip, inspect_zip_headers, list_zip, path_eq, plan_write, stays_under, write_zip,
-    AesMode, ExtractRequest, InputItem, ListRequest, NameEncoding, Progress, WriteRequest,
-    ZipcoreError, EFS_UTF8_BIT,
+    absolute, extract_zip, inspect_zip_headers, list_zip, normalize_lexically, path_eq, plan_write,
+    stays_under, write_zip, AesMode, ExtractRequest, InputItem, ListRequest, NameEncoding,
+    Progress, WriteRequest, ZipcoreError, EFS_UTF8_BIT,
 };
 
 use crate::dto::{
@@ -81,7 +81,7 @@ fn resolve_inputs(sandbox: &Sandbox, paths: &[String]) -> Result<Vec<InputItem>,
     for raw in paths {
         let given = path_buf(raw);
         let path = sandbox.resolve(&given)?;
-        let abs = zipcore::absolute(&given);
+        let abs = normalize_lexically(&absolute(&given));
         let meta = fs::symlink_metadata(&abs)
             .map_err(|_| format!("入力が見つかりません: {}", abs.display()))?;
         if meta.file_type().is_symlink() {

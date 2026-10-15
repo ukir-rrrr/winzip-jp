@@ -299,6 +299,26 @@ fn symlink_input_is_rejected_before_follow() {
     .unwrap_err();
     assert!(err.contains("シンボリックリンク"), "{err}");
     assert!(!dest.exists());
+
+    let real_dir = root.join("real");
+    fs::create_dir_all(&real_dir).unwrap();
+    fs::write(real_dir.join("x.txt"), b"x").unwrap();
+    let alias = root.join("alias");
+    std::os::unix::fs::symlink(&real_dir, &alias).unwrap();
+    let sandbox = grant(&[&root, &real_dir, &dest]);
+    let err = create_archive_direct(
+        &sandbox,
+        &CreateDto {
+            paths: vec![format!("{}/", alias.display())],
+            replacements: Default::default(),
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("シンボリックリンク"), "{err}");
+    assert!(!dest.exists());
     let _ = fs::remove_dir_all(&root);
 }
 
