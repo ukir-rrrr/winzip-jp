@@ -8,8 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Emitter;
 use zipcore::{
-    extract_zip, inspect_zip_headers, list_zip, plan_write, write_zip, AesMode, ExtractRequest,
-    InputItem, ListRequest, NameEncoding, Progress, WriteRequest, ZipcoreError, EFS_UTF8_BIT,
+    extract_zip, inspect_zip_headers, list_zip, path_eq, plan_write, stays_under, write_zip,
+    AesMode, ExtractRequest, InputItem, ListRequest, NameEncoding, Progress, WriteRequest,
+    ZipcoreError, EFS_UTF8_BIT,
 };
 
 use crate::dto::{
@@ -78,10 +79,7 @@ fn resolve_inputs(sandbox: &Sandbox, paths: &[String]) -> Result<Vec<InputItem>,
         let meta = fs::symlink_metadata(&abs)
             .map_err(|_| format!("入力が見つかりません: {}", abs.display()))?;
         if meta.file_type().is_symlink() {
-            return Err(format!(
-                "シンボリックリンクは扱えません: {}",
-                abs.display()
-            ));
+            return Err(format!("シンボリックリンクは扱えません: {}", abs.display()));
         }
         inputs.push(InputItem {
             as_dir: meta.is_dir(),
@@ -121,12 +119,16 @@ pub fn create_archive_direct(
     cancel: &AtomicBool,
 ) -> Result<WriteReportDto, String> {
     progress(starting_progress());
-    let dest = sandbox.resolve(&path_buf(dest))?;
-    if dest.is_dir() {
-        return Err("保存先がフォルダです".into());
-    }
+    let dest = sandbox.resolve_save_file(&path_buf(dest))?;
     let inputs = resolve_inputs(sandbox, &req.paths)?;
     planned_sources_in_scope(sandbox, &inputs)?;
+    if inputs.iter().any(|item| {
+        path_eq(&dest, &item.abs_path) || (item.as_dir && stays_under(&dest, &item.abs_path))
+    }) {
+        return Err(map_err(ZipcoreError::DestOverlapsInput {
+            dest: dest.clone(),
+        }));
+    }
 
     let tmp = TmpGuard(container_tmp_zip());
     let write_req = WriteRequest {

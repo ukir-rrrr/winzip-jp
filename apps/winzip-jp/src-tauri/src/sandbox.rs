@@ -156,6 +156,25 @@ impl Sandbox {
         })
     }
 
+    /// 保存先 ZIP は完全一致の grant だけ。入力フォルダ配下だからといって上書きしない。
+    pub fn resolve_save_file(&self, path: &Path) -> Result<PathBuf, String> {
+        let raw = path.to_string_lossy();
+        if raw.is_empty() || raw.contains('\0') {
+            return Err("パスが不正です".into());
+        }
+        let resolved = resolve_path(path);
+        if resolved.is_dir() {
+            return Err("保存先がフォルダです".into());
+        }
+        if self.grants.iter().any(|g| path_eq(&resolved, &g.path)) {
+            return Ok(resolved);
+        }
+        Err(format!(
+            "この場所にはアクセスできません: {}",
+            resolved.display()
+        ))
+    }
+
     /// コマンド引数を許可ルート配下へ正規化する。
     pub fn resolve(&self, path: &Path) -> Result<PathBuf, String> {
         let raw = path.to_string_lossy();
@@ -384,8 +403,30 @@ mod tests {
         let mut sandbox = Sandbox::new();
         sandbox.grant_save_dest(&dest);
         assert!(sandbox.allows(&dest));
+        assert!(sandbox.resolve_save_file(&dest).is_ok());
         assert!(!sandbox.allows(&sibling));
         assert!(!sandbox.allows(&root));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn folder_grant_does_not_imply_save_file() {
+        let root = std::env::temp_dir().join(format!(
+            "wzjp-save-exact-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let dest = root.join("out.zip");
+        let mut sandbox = Sandbox::new();
+        assert!(sandbox.grant(&root));
+        assert!(sandbox.allows(&dest));
+        assert!(sandbox.resolve_save_file(&dest).is_err());
+        assert!(sandbox.grant_save_dest(&dest));
+        assert!(sandbox.resolve_save_file(&dest).is_ok());
         let _ = fs::remove_dir_all(&root);
     }
 }

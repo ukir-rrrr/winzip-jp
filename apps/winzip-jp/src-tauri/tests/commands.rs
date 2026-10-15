@@ -324,6 +324,53 @@ fn create_rejects_directory_as_dest() {
 }
 
 #[test]
+fn create_dest_inside_input_tree_needs_own_grant() {
+    let root = unique_dir("dest-own");
+    let src = root.join("a.txt");
+    fs::write(&src, b"x").unwrap();
+    let dest = root.join("a.zip");
+    let sandbox = grant(&[&root, &src]);
+    let err = create_archive_direct(
+        &sandbox,
+        &CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("アクセスできません"), "{err}");
+    assert!(!dest.exists());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn dest_inside_input_dir_is_rejected() {
+    let root = unique_dir("dest-overlap");
+    let src_dir = root.join("in");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("a.txt"), b"x").unwrap();
+    let dest = src_dir.join("out.zip");
+    let sandbox = grant(&[&root, &src_dir, &dest]);
+    let err = create_archive_direct(
+        &sandbox,
+        &CreateDto {
+            paths: vec![src_dir.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("入力フォルダの中"), "{err}");
+    assert!(!dest.exists());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn save_dest_grant_does_not_admit_siblings() {
     let root = unique_dir("save-sib");
     let src = root.join("ok.txt");
