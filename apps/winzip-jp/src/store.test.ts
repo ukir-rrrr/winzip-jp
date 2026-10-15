@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { installApi, resetApi } from "./api";
+import { installApi, jaErr, resetApi } from "./api";
 import { COPY } from "./copy";
 import { S3_PLAN } from "./e2e/scenes";
 import { useAppStore } from "./store";
@@ -408,5 +408,40 @@ describe("世代トークン", () => {
     assert.deepEqual(useAppStore.getState().dropped, ["/tmp/e2e/in"]);
     assert.ok(useAppStore.getState().job);
     void create;
+  });
+});
+
+describe("展開エラー文言", () => {
+  it("CRC 不一致は jaErr 経由で英語頭字語を出さない", async () => {
+    installApi({
+      async pickExtractDir() {
+        return "/tmp/e2e/展開";
+      },
+      async extractArchive() {
+        throw jaErr(COPY.failed, new Error("ZIP が壊れています: a.txt の CRC が一致しません"));
+      },
+    });
+    useAppStore.setState({
+      mode: "extract",
+      archivePath: "/tmp/e2e/crc.zip",
+      dropped: ["/tmp/e2e/crc.zip"],
+      confirming: false,
+      job: null,
+      sheet: "none",
+      list: {
+        entries: [{ nameHex: "612E747874", displayName: "a.txt", isDir: false, uncompressedSize: 5, gpbf: 0 }],
+        encoding: "cp932",
+        confidence: 1,
+        ambiguous: false,
+      },
+      error: "",
+    });
+    await useAppStore.getState().extractZip();
+    assert.equal(
+      useAppStore.getState().error,
+      "ZIP が壊れています: a.txt の中身が壊れています（チェックサムが一致しません）",
+    );
+    assert.equal(useAppStore.getState().error.includes("CRC"), false);
+    assert.equal(useAppStore.getState().job, null);
   });
 });

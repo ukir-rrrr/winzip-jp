@@ -109,4 +109,15 @@ describe("画面 S1–S8", () => {
     expect(dest).toContain("/tmp/e2e/展開");
     await shot("s8");
   });
+
+  it("展開 CRC 不一致は英語頭字語を出さない", async () => {
+    await openScene("crc");
+    await expect($("[data-testid='status-text']")).toHaveText(
+      "ZIP が壊れています: a.txt の中身が壊れています（チェックサムが一致しません）",
+    );
+    const body = await $("body").getText();
+    expect(body).not.toContain("CRC");
+    expect(body).not.toContain("EOCD");
+    await shot("crc");
+  });
 });

@@ -38,4 +38,41 @@ describe("jaErr", () => {
       "入力が見つかりません: /tmp/EOCD 署名がありません.png",
     );
   });
+
+  it("rewrites CRC in zipcore corrupt messages", () => {
+    assert.equal(
+      toUiJa("ZIP が壊れています: a.txt の CRC が一致しません"),
+      "ZIP が壊れています: a.txt の中身が壊れています（チェックサムが一致しません）",
+    );
+    assert.equal(
+      toUiJa("ZIP が壊れています: 書類/が.txt の CRC が一致しません"),
+      "ZIP が壊れています: 書類/が.txt の中身が壊れています（チェックサムが一致しません）",
+    );
+    assert.equal(
+      toUiJa("ZIP が壊れています: ローカルと中央ディレクトリのフラグ / メソッド / CRC が一致しません"),
+      "ZIP が壊れています: ローカルと中央ディレクトリのフラグ / メソッド / チェックサムが一致しません",
+    );
+    assert.equal(
+      jaErr(COPY.failed, new Error("ZIP が壊れています: a.txt の CRC が一致しません")).message,
+      "ZIP が壊れています: a.txt の中身が壊れています（チェックサムが一致しません）",
+    );
+    assert.equal(
+      jaErr(
+        COPY.failed,
+        new Error("ZIP が壊れています: ローカルと中央ディレクトリのフラグ / メソッド / CRC が一致しません"),
+      ).message,
+      "ZIP が壊れています: ローカルと中央ディレクトリのフラグ / メソッド / チェックサムが一致しません",
+    );
+    assert.equal(
+      jaErr(COPY.failed, new Error("入力が見つかりません: /tmp/CRC.zip")).message,
+      "入力が見つかりません: /tmp/CRC.zip",
+    );
+    assert.equal(
+      jaErr(COPY.failed, new Error("入力が見つかりません: /tmp/a.txt の CRC が一致しません.png")).message,
+      "入力が見つかりません: /tmp/a.txt の CRC が一致しません.png",
+    );
+    assert.ok(
+      !jaErr(COPY.failed, new Error("ZIP が壊れています: a.txt の CRC が一致しません")).message.includes("CRC"),
+    );
+  });
 });

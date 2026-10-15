@@ -1,4 +1,5 @@
-import { installApi, resetApi } from "../api";
+import { installApi, jaErr, resetApi } from "../api";
+import { COPY } from "../copy";
 import { useAppStore } from "../store";
 import { E2E_CREATE_DEST, E2E_EXTRACT_DEST, S2_PLAN, S3_PLAN, S6_LIST, S7_LIST } from "./scenes";
 import type { ListReport, NameEncoding, PlanDto, WriteReport, ZipApi } from "../types";
@@ -83,6 +84,18 @@ async function loadScene(id: string): Promise<void> {
     store.setMode("extract");
     installApi(mockApi(null, (encoding) => (encoding === "utf8" ? S7_LIST : S6_LIST)));
     await store.ingestDropped(["/tmp/e2e/cp932-typical.zip"]);
+    return;
+  }
+  if (id === "crc") {
+    store.setMode("extract");
+    installApi({
+      ...mockApi(null, () => S6_LIST),
+      async extractArchive() {
+        throw jaErr(COPY.failed, new Error("ZIP が壊れています: a.txt の CRC が一致しません"));
+      },
+    });
+    await store.ingestDropped(["/tmp/e2e/crc.zip"]);
+    await store.extractZip();
   }
 }
 

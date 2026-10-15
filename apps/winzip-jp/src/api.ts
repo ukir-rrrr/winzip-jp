@@ -62,6 +62,11 @@ const CORRUPT_PREFIX = "ZIP が壊れています:";
 const JA_ACRONYM_REWRITES: ReadonlyArray<readonly [string, string]> = [
   ["EOCD 署名がありません", "中央ディレクトリ終端の署名がありません"],
   ["EOCD が見つかりません", "中央ディレクトリ終端が見つかりません"],
+  ["の CRC が一致しません", "の中身が壊れています（チェックサムが一致しません）"],
+  [
+    "フラグ / メソッド / CRC が一致しません",
+    "フラグ / メソッド / チェックサムが一致しません",
+  ],
 ];
 
 export function toUiJa(msg: string): string {
