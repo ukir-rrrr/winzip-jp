@@ -521,6 +521,27 @@ fn extract_rejects_symlink_entry() {
 }
 
 #[test]
+fn extract_rejects_cp932_symlink_with_decoded_name() {
+    let tmp = support::TempDir::new();
+    let name = encode_entry_name("が").cp932;
+    let zip = tmp.path().join("link.zip");
+    write_stored_zip_ex(&zip, &[(&name, b"../evil", 0)], 3, 0o120777 << 16);
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(&dest).unwrap();
+    let err = extract_zip(
+        extract_req(zip, dest.clone(), false),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    let text = err.to_string();
+    assert!(matches!(err, ZipcoreError::PathTraversal { .. }), "{text}");
+    assert!(text.contains("が"), "{text}");
+    assert!(!text.contains('\u{FFFD}'), "{text}");
+    assert!(!dest.join("が").exists());
+}
+
+#[test]
 fn overwrite_false_leaves_existing_and_errors() {
     let tmp = support::TempDir::new();
     let zip = tmp.path().join("a.zip");

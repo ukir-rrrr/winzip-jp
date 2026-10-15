@@ -351,7 +351,6 @@ fn catalog_archive(
         let name_raw = file.name_raw().to_vec();
         let extra = file.extra_data().unwrap_or_default();
         let gpbf = file.flags().as_u16();
-        // zip crate は末尾 0x5C をディレクトリにする。CP932 の 表/ソ などを誤判定するので使わない。
         let is_dir = zip_name_is_dir(&name_raw);
         let encrypted = file.encrypted();
         let is_symlink = file.is_symlink();
@@ -360,10 +359,6 @@ fn catalog_archive(
         let crc = file.crc32();
         drop(file);
 
-        if is_symlink {
-            let shown = String::from_utf8_lossy(&name_raw).into_owned();
-            return Err(ZipcoreError::PathTraversal { entry: shown });
-        }
         if !is_dir {
             if uncompressed_size > MAX_ENTRY_UNCOMPRESSED {
                 return Err(ZipcoreError::LimitsExceeded {
@@ -389,6 +384,7 @@ fn catalog_archive(
             name_raw,
             is_dir,
             encrypted,
+            is_symlink,
             uncompressed_size,
             compressed_size,
             crc,
@@ -403,6 +399,11 @@ fn catalog_archive(
     for raw in raw_entries {
         let display_name: String = decode_name(&raw.name_raw, encoding).nfc().collect();
         if unsafe_entry_reason(&raw.name_raw, &display_name).is_some() {
+            return Err(ZipcoreError::PathTraversal {
+                entry: display_name,
+            });
+        }
+        if raw.is_symlink {
             return Err(ZipcoreError::PathTraversal {
                 entry: display_name,
             });
@@ -439,6 +440,7 @@ struct RawMeta {
     name_raw: Vec<u8>,
     is_dir: bool,
     encrypted: bool,
+    is_symlink: bool,
     uncompressed_size: u64,
     compressed_size: u64,
     crc: u32,
@@ -969,7 +971,6 @@ mod tests {
         assert!(zip_name_is_dir(b"dir/"));
         assert!(zip_name_is_dir(br"dir\"));
         assert!(zip_name_is_dir(&[0x95, 0x5C, b'\\']));
-        // 亜 (88 9F) + 単独 0x5C。直前バイトだけ見ると 9F 5C を 1 文字と誤認する。
         assert!(zip_name_is_dir(&[0x88, 0x9F, b'\\']));
         assert!(unsafe_entry_reason(b"", "").is_some());
         assert!(unsafe_entry_reason(b".", ".").is_some());
