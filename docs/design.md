@@ -459,7 +459,7 @@ pick_save_zip → startAccessing(dest ファイル)
 コンテナ内 tmp.zip に write_zip
 fsync → dest へ rename
   別ボリューム（EXDEV）だけ copy + remove。既存 dest はコンテナへ退避してから置き、失敗したら戻す。
-  親フォルダに sidecar は作らない。
+  戻しに失敗したら退避は消さない。親フォルダに sidecar は作らない。
 失敗・キャンセル → tmp 削除
 stopAccessing(all)
 ```

@@ -266,18 +266,24 @@ pub fn publish_tmp(tmp: &Path, dest: &Path) -> io::Result<()> {
 }
 
 /// 別ボリュームでは dest を直接 copy する。失敗時は既存 dest をコンテナ退避から戻す。
+/// 戻しに失敗したら退避は消さない。
 fn publish_across_volumes(tmp: &Path, dest: &Path) -> io::Result<()> {
-    let backup = if dest.exists() {
-        let bak = container_tmp_zip();
-        if let Err(e) = fs::copy(dest, &bak) {
+    let backup = dest.exists().then(container_tmp_zip);
+    publish_across_volumes_inner(tmp, dest, backup)
+}
+
+fn publish_across_volumes_inner(
+    tmp: &Path,
+    dest: &Path,
+    backup: Option<PathBuf>,
+) -> io::Result<()> {
+    if let Some(bak) = &backup {
+        if let Err(e) = fs::copy(dest, bak) {
             discard_tmp(tmp);
             return Err(e);
         }
-        Some(bak)
-    } else {
-        None
-    };
-    match fs::copy(tmp, dest) {
+    }
+    match copy_tmp_to_dest(tmp, dest) {
         Ok(_) => {
             discard_tmp(tmp);
             if let Some(bak) = backup {
@@ -287,8 +293,7 @@ fn publish_across_volumes(tmp: &Path, dest: &Path) -> io::Result<()> {
         }
         Err(e) => {
             if let Some(bak) = backup {
-                let _ = fs::copy(&bak, dest);
-                let _ = fs::remove_file(bak);
+                restore_or_keep_backup(&bak, dest);
             } else {
                 let _ = fs::remove_file(dest);
             }
@@ -296,6 +301,31 @@ fn publish_across_volumes(tmp: &Path, dest: &Path) -> io::Result<()> {
             Err(e)
         }
     }
+}
+
+fn copy_tmp_to_dest(tmp: &Path, dest: &Path) -> io::Result<u64> {
+    #[cfg(test)]
+    if FAIL_AFTER_TRUNCATE.with(|c| c.replace(false)) {
+        let _ = File::create(dest);
+        let _ = fs::remove_file(dest);
+        let _ = fs::create_dir(dest);
+        return Err(io::Error::new(
+            io::ErrorKind::StorageFull,
+            "copy failed after truncate",
+        ));
+    }
+    fs::copy(tmp, dest)
+}
+
+fn restore_or_keep_backup(bak: &Path, dest: &Path) {
+    if fs::copy(bak, dest).is_ok() {
+        let _ = fs::remove_file(bak);
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_AFTER_TRUNCATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 pub fn discard_tmp(tmp: &Path) {
@@ -469,6 +499,55 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(leftover, vec!["out.zip".to_string()]);
+        let _ = fs::remove_dir_all(&dest_root);
+    }
+
+    #[test]
+    fn restore_keeps_backup_when_dest_cannot_be_written() {
+        let dest_root = std::env::temp_dir().join(format!(
+            "wzjp-restore-keep-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dest_root).unwrap();
+        let dest = dest_root.join("out.zip");
+        fs::create_dir_all(&dest).unwrap();
+        let bak = container_tmp_zip();
+        fs::write(&bak, b"old").unwrap();
+        restore_or_keep_backup(&bak, &dest);
+        assert!(bak.exists());
+        assert_eq!(fs::read(&bak).unwrap(), b"old");
+        let _ = fs::remove_file(&bak);
+        let _ = fs::remove_dir_all(&dest_root);
+    }
+
+    #[test]
+    fn publish_across_volumes_keeps_backup_when_restore_fails() {
+        let dest_root = std::env::temp_dir().join(format!(
+            "wzjp-xdev-restore-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dest_root).unwrap();
+        let dest = dest_root.join("out.zip");
+        fs::write(&dest, b"old").unwrap();
+        let tmp = container_tmp_zip();
+        fs::write(&tmp, b"new").unwrap();
+        let bak = container_tmp_zip();
+        FAIL_AFTER_TRUNCATE.with(|c| c.set(true));
+        let err = publish_across_volumes_inner(&tmp, &dest, Some(bak.clone()));
+        FAIL_AFTER_TRUNCATE.with(|c| c.set(false));
+        assert!(err.is_err());
+        assert!(!tmp.exists());
+        assert!(bak.exists());
+        assert_eq!(fs::read(&bak).unwrap(), b"old");
+        let _ = fs::remove_file(&bak);
         let _ = fs::remove_dir_all(&dest_root);
     }
 
