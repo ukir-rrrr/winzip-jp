@@ -180,6 +180,7 @@ impl Sandbox {
     }
 
     /// 許可パスだけを複製する。security-scoped の寿命は元の `Sandbox` が持つ。
+    /// スナップショットは判定用で、`startAccessing` の保持はしない。
     pub fn snapshot_paths(&self) -> Self {
         Self {
             grants: self

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Box, Button, Text, Title, UnstyledButton } from "@mantine/core";
 import "./App.css";
 
@@ -43,18 +43,27 @@ function isS4Draft(): boolean {
   return new URLSearchParams(window.location.search).get("s4") === "1";
 }
 
+const STARTING: ProgressDto = {
+  phase: "starting",
+  currentEntry: null,
+  entriesDone: 0,
+  entriesTotal: 0,
+  bytesDone: 0,
+  bytesTotal: 0,
+};
+
+const PHASE_LABEL: Record<ProgressDto["phase"], string> = {
+  starting: "開始しています",
+  writing: "書き込み中",
+  finishing: "仕上げています",
+  done: "完了",
+};
+
 function progressLabel(progress: ProgressDto | null): string {
   if (!progress) {
     return "進捗はまだありません";
   }
-  const phase =
-    progress.phase === "starting"
-      ? "開始しています"
-      : progress.phase === "writing"
-        ? "書き込み中"
-        : progress.phase === "finishing"
-          ? "仕上げています"
-          : "完了";
+  const phase = PHASE_LABEL[progress.phase];
   if (progress.currentEntry) {
     return `${phase} ${progress.currentEntry}`;
   }
@@ -76,14 +85,7 @@ export default function App() {
 
   useEffect(() => {
     if (isS4Draft() && !hasTauri()) {
-      setProgress({
-        phase: "starting",
-        currentEntry: null,
-        entriesDone: 0,
-        entriesTotal: 0,
-        bytesDone: 0,
-        bytesTotal: 0,
-      });
+      setProgress(STARTING);
     }
   }, []);
 
@@ -116,22 +118,10 @@ export default function App() {
     };
   }, []);
 
-  const draftStarting = useMemo<ProgressDto>(
-    () => ({
-      phase: "starting",
-      currentEntry: null,
-      entriesDone: 0,
-      entriesTotal: 0,
-      bytesDone: 0,
-      bytesTotal: 0,
-    }),
-    [],
-  );
-
   async function onCreate() {
     if (!hasTauri()) {
       if (isS4Draft()) {
-        setProgress(draftStarting);
+        setProgress(STARTING);
         setStatus("開始しています");
       } else {
         setStatus("この画面では作成できません");

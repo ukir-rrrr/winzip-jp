@@ -73,6 +73,7 @@ fn resolve_inputs(sandbox: &Sandbox, paths: &[String]) -> Result<Vec<InputItem>,
     let mut inputs = Vec::with_capacity(paths.len());
     for raw in paths {
         let given = path_buf(raw);
+        let path = sandbox.resolve(&given)?;
         let abs = zipcore::absolute(&given);
         let meta = fs::symlink_metadata(&abs)
             .map_err(|_| format!("入力が見つかりません: {}", abs.display()))?;
@@ -82,7 +83,6 @@ fn resolve_inputs(sandbox: &Sandbox, paths: &[String]) -> Result<Vec<InputItem>,
                 abs.display()
             ));
         }
-        let path = sandbox.resolve(&given)?;
         inputs.push(InputItem {
             as_dir: meta.is_dir(),
             abs_path: path,
@@ -128,39 +128,32 @@ pub fn create_archive_direct(
     let inputs = resolve_inputs(sandbox, &req.paths)?;
     planned_sources_in_scope(sandbox, &inputs)?;
 
-    let tmp = container_tmp_zip();
+    let tmp = TmpGuard(container_tmp_zip());
     let write_req = WriteRequest {
         inputs,
-        dest: tmp.clone(),
+        dest: tmp.0.clone(),
         password: None,
         aes: AesMode::Aes256,
         split_bytes: None,
         replacements: req.replacements.clone(),
     };
-    let result = write_zip(write_req, &mut progress, cancel);
-    match result {
-        Ok(report) => {
-            if inspect_zip_headers(&tmp)
-                .map_err(|e| {
-                    discard_tmp(&tmp);
-                    map_err(e)
-                })?
-                .iter()
-                .any(|e| e.gpbf & EFS_UTF8_BIT != 0)
-            {
-                discard_tmp(&tmp);
-                return Err("EFS（bit 11）が立っています".into());
-            }
-            if let Err(e) = publish_tmp(&tmp, &dest) {
-                discard_tmp(&tmp);
-                return Err(format!("保存先へ移せませんでした: {}", io_ja(e)));
-            }
-            Ok(WriteReportDto::from(report).with_dest(&dest))
-        }
-        Err(e) => {
-            discard_tmp(&tmp);
-            Err(map_err(e))
-        }
+    let report = write_zip(write_req, &mut progress, cancel).map_err(map_err)?;
+    if inspect_zip_headers(&tmp.0)
+        .map_err(map_err)?
+        .iter()
+        .any(|e| e.gpbf & EFS_UTF8_BIT != 0)
+    {
+        return Err("EFS（bit 11）が立っています".into());
+    }
+    publish_tmp(&tmp.0, &dest).map_err(|e| format!("保存先へ移せませんでした: {}", io_ja(e)))?;
+    Ok(WriteReportDto::from(report).with_dest(&dest))
+}
+
+struct TmpGuard(PathBuf);
+
+impl Drop for TmpGuard {
+    fn drop(&mut self) {
+        discard_tmp(&self.0);
     }
 }
 
@@ -244,6 +237,31 @@ fn extend_fs_scope(app: &tauri::AppHandle, paths: &[PathBuf]) {
             let _ = scope.allow_file(path);
         }
     }
+}
+
+enum GrantKind {
+    Selected,
+    SaveDest,
+}
+
+fn admit(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    paths: &[PathBuf],
+    kind: GrantKind,
+) -> Result<(), String> {
+    let mut sandbox = lock_sandbox(&state.sandbox)?;
+    match kind {
+        GrantKind::Selected => sandbox.grant_many(paths),
+        GrantKind::SaveDest => {
+            for path in paths {
+                sandbox.grant_save_dest(path);
+            }
+        }
+    }
+    drop(sandbox);
+    extend_fs_scope(app, paths);
+    Ok(())
 }
 
 fn file_path_to_buf(path: tauri_plugin_dialog::FilePath) -> Result<PathBuf, String> {
@@ -347,10 +365,7 @@ pub async fn pick_files(
     for file in files {
         paths.push(file_path_to_buf(file)?);
     }
-    let mut sandbox = lock_sandbox(&state.sandbox)?;
-    sandbox.grant_many(&paths);
-    drop(sandbox);
-    extend_fs_scope(&app, &paths);
+    admit(&app, &state, &paths, GrantKind::Selected)?;
     Ok(paths
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())
@@ -382,10 +397,7 @@ pub async fn pick_save_zip(
         return Ok(None);
     };
     let path = file_path_to_buf(file)?;
-    let mut sandbox = lock_sandbox(&state.sandbox)?;
-    sandbox.grant_save_dest(&path);
-    drop(sandbox);
-    extend_fs_scope(&app, &[path.clone()]);
+    admit(&app, &state, &[path.clone()], GrantKind::SaveDest)?;
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
@@ -404,20 +416,14 @@ pub async fn pick_extract_dir(
         return Ok(None);
     };
     let path = file_path_to_buf(folder)?;
-    let mut sandbox = lock_sandbox(&state.sandbox)?;
-    sandbox.grant(&path);
-    drop(sandbox);
-    extend_fs_scope(&app, &[path.clone()]);
+    admit(&app, &state, &[path.clone()], GrantKind::Selected)?;
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 pub fn grant_dropped(state: &AppState, app: &tauri::AppHandle, paths: &[PathBuf]) -> Vec<String> {
-    let Ok(mut sandbox) = state.sandbox.lock() else {
+    if admit(app, state, paths, GrantKind::Selected).is_err() {
         return Vec::new();
-    };
-    sandbox.grant_many(paths);
-    drop(sandbox);
-    extend_fs_scope(app, paths);
+    }
     paths
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
