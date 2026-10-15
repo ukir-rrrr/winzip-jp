@@ -1,0 +1,7 @@
+{
+  "extra_files": {
+    ".DS_Store": "desktop",
+    "nested/.DS_Store": "desktop",
+    "__MACOSX/._keep.txt": "apple"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "replacements": {},
+  "excluded": [],
+  "entries": [
+    {
+      "name_nfc": "空/",
+      "name_hex": "8BF32F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "空/中/",
+      "name_hex": "8BF32F92862F",
+      "gpbf": 0,
+      "method": 0
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "replacements": {
+    "髙.txt": "高.txt"
+  },
+  "excluded": [],
+  "entries": [
+    {
+      "name_nfc": "高.txt",
+      "name_hex": "8D822E747874",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "高 (2).txt",
+      "name_hex": "8D82202832292E747874",
+      "gpbf": 0,
+      "method": 8
+    }
+  ]
+}

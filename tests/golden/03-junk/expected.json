@@ -1,0 +1,28 @@
+{
+  "replacements": {},
+  "excluded": [
+    ".DS_Store",
+    "nested/.DS_Store",
+    "__MACOSX"
+  ],
+  "entries": [
+    {
+      "name_nfc": "keep.txt",
+      "name_hex": "6B6565702E747874",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "nested/",
+      "name_hex": "6E65737465642F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "nested/ok.txt",
+      "name_hex": "6E65737465642F6F6B2E747874",
+      "gpbf": 0,
+      "method": 8
+    }
+  ]
+}

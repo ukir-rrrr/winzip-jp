@@ -1,0 +1,42 @@
+{
+  "replacements": {},
+  "excluded": [],
+  "entries": [
+    {
+      "name_nfc": "①.txt",
+      "name_hex": "87402E747874",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "ⅱ.txt",
+      "name_hex": "FA412E747874",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "㈱.txt",
+      "name_hex": "878A2E747874",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "①ⅱ㈱.txt",
+      "name_hex": "8740FA41878A2E747874",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "記号/",
+      "name_hex": "8B4C8D862F",
+      "gpbf": 0,
+      "method": 0
+    },
+    {
+      "name_nfc": "記号/①.txt",
+      "name_hex": "8B4C8D862F87402E747874",
+      "gpbf": 0,
+      "method": 8
+    }
+  ]
+}
