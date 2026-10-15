@@ -87,6 +87,8 @@ pub fn inspect_zip_headers(path: &Path) -> Result<Vec<InspectedEntry>, ZipcoreEr
     if volumes.len() <= 1 {
         inspect_zip(path)
     } else {
+        // inspect_reader は local_offset へ seek する。分割ではオフセットが
+        // ディスク相対なので、ConcatReader をそのまま渡すとローカルヘッダがずれる。
         let data = split::linearize_volumes(path)?;
         inspect_reader(&mut io::Cursor::new(data))
     }

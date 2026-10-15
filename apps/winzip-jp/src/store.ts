@@ -211,7 +211,7 @@ export const useAppStore = create<AppState>((set, get) => {
       return "empty";
     }
     const mb = Number(trimmed);
-    if (!Number.isInteger(mb) || mb <= 0) {
+    if (!Number.isSafeInteger(mb) || mb <= 0) {
       return "invalid";
     }
     const bytes = splitMbToBytes(mb);
