@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use zipcore::{absolute, atomic_replace, path_eq, resolve_path, stays_under};
+use zipcore::{absolute, atomic_replace, normalize_lexically, path_eq, resolve_path, stays_under};
 
 const TMP_PREFIX: &str = "winzip-jp-";
 
@@ -88,8 +88,6 @@ struct Grant {
 #[derive(Default)]
 pub struct Sandbox {
     grants: Vec<Grant>,
-    #[cfg(target_os = "macos")]
-    kernel_holds: Vec<scoped::ScopedUrl>,
 }
 
 impl Sandbox {
@@ -100,7 +98,7 @@ impl Sandbox {
     /// ダイアログ / ドロップで選んだ入力。ディレクトリなら配下も許可。
     /// シンボリックリンク自体は拒否し、リンク先ツリーを開かない。
     pub fn grant(&mut self, path: &Path) -> bool {
-        let abs = absolute(path);
+        let abs = normalize_lexically(&absolute(path));
         if is_symlink(&abs) {
             return false;
         }
@@ -116,17 +114,14 @@ impl Sandbox {
         }
     }
 
-    /// 保存先 ZIP。ファイルだけ許可し、親フォルダはカーネル許可のみ。
+    /// 保存先 ZIP。ファイルだけ許可する。親フォルダはセッションにもカーネルにも開かない。
     pub fn grant_save_dest(&mut self, path: &Path) -> bool {
-        let abs = absolute(path);
+        let abs = normalize_lexically(&absolute(path));
         if is_symlink(&abs) {
             return false;
         }
         let stored = resolve_path(&abs);
-        self.insert(abs.clone(), stored, false);
-        if let Some(parent) = abs.parent() {
-            self.hold_kernel(parent, true);
-        }
+        self.insert(abs, stored, false);
         true
     }
 
@@ -146,17 +141,6 @@ impl Sandbox {
             #[cfg(target_os = "macos")]
             _access: access,
         });
-    }
-
-    fn hold_kernel(&mut self, path: &Path, is_dir: bool) {
-        #[cfg(target_os = "macos")]
-        if let Some(url) = scoped::ScopedUrl::start(path, is_dir) {
-            self.kernel_holds.push(url);
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (path, is_dir);
-        }
     }
 
     pub fn allows(&self, path: &Path) -> bool {
@@ -202,8 +186,6 @@ impl Sandbox {
                     _access: None,
                 })
                 .collect(),
-            #[cfg(target_os = "macos")]
-            kernel_holds: Vec::new(),
         }
     }
 }
@@ -318,6 +300,8 @@ mod tests {
 
         let mut sandbox = Sandbox::new();
         assert!(!sandbox.grant(&alias));
+        let alias_slash = PathBuf::from(format!("{}/", alias.display()));
+        assert!(!sandbox.grant(&alias_slash));
         assert!(!sandbox.allows(&file));
         assert!(!sandbox.allows(&alias.join("x.txt")));
         assert!(sandbox.grant(&real));
