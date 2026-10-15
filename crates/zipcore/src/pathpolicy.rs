@@ -74,8 +74,11 @@ fn component_reject(component: &str) -> Option<NameReject> {
     if component.contains('\0') {
         return Some(NameReject::Invalid("NUL文字"));
     }
-    if component.contains('\\') || component.contains('/') || component.contains(':') {
+    if component.contains('\\') || component.contains('/') || looks_like_drive(component) {
         return Some(NameReject::Escape);
+    }
+    if component.contains(':') {
+        return Some(NameReject::Invalid("この名前は使えません"));
     }
     if is_reserved_dos_name(component) {
         return Some(NameReject::Invalid("この名前は使えません"));
@@ -119,16 +122,8 @@ fn for_each_raw_component(raw: &[u8], mut visit: impl FnMut(&[u8]) -> bool) -> b
     visit(&raw[start..])
 }
 
-fn raw_has_ascii_colon(raw: &[u8]) -> bool {
-    let mut i = 0;
-    while i < raw.len() {
-        let step = next_raw_unit(raw, i);
-        if step == 1 && raw[i] == b':' {
-            return true;
-        }
-        i += step;
-    }
-    false
+fn raw_starts_with_drive(raw: &[u8]) -> bool {
+    raw.len() >= 2 && raw[0].is_ascii_alphabetic() && raw[1] == b':' && next_raw_unit(raw, 0) == 1
 }
 
 fn raw_escape(raw: &[u8]) -> bool {
@@ -138,7 +133,7 @@ fn raw_escape(raw: &[u8]) -> bool {
     if raw[0] == b'/' || raw[0] == b'\\' {
         return true;
     }
-    if raw_has_ascii_colon(raw) {
+    if raw_starts_with_drive(raw) {
         return true;
     }
     for_each_raw_component(raw, |part| part == b"..")
@@ -239,8 +234,13 @@ mod tests {
         );
         assert_eq!(
             classify_name(b"foo:bar", "foo:bar"),
-            Some(NameReject::Escape)
+            Some(NameReject::Invalid("この名前は使えません"))
         );
+        assert_eq!(
+            classify_name(b"Note: 2024.txt", "Note: 2024.txt"),
+            Some(NameReject::Invalid("この名前は使えません"))
+        );
+        assert_eq!(classify_name(b"C:evil", "C:evil"), Some(NameReject::Escape));
         assert_eq!(classify_name(b"ok/file.txt", "ok/file.txt"), None);
         assert_eq!(classify_name(b"dir/", "dir/"), None);
         assert_eq!(classify_name("が.txt".as_bytes(), "が.txt"), None);

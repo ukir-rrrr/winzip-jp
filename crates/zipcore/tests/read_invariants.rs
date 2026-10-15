@@ -311,8 +311,9 @@ fn extract_rejects_drive_letter() {
 
 #[test]
 fn extract_rejects_colon_ads_name() {
-    assert_extract_traversal(b"foo:bar");
-    assert_extract_traversal(b"dir/foo:bar.txt");
+    assert_extract_invalid(b"foo:bar");
+    assert_extract_invalid(b"dir/foo:bar.txt");
+    assert_extract_invalid(b"Note: 2024.txt");
 }
 
 #[test]
