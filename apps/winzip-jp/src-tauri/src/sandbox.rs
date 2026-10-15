@@ -305,7 +305,7 @@ pub fn publish_tmp_set(tmp_vols: &[PathBuf], dest_vols: &[PathBuf]) -> Result<()
         let _ = fs::remove_file(bak);
     }
     if let Some(dest) = dest_vols.last() {
-        let _ = split::discard_stale_volumes(dest, dest_vols.len() as u32);
+        split::discard_stale_volumes(dest, dest_vols.len() as u32);
     }
     Ok(())
 }
