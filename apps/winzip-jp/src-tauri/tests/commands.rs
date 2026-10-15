@@ -74,7 +74,10 @@ fn create_list_extract_with_direct_paths() {
     )
     .expect("create");
     assert!(Path::new(&report.dest).exists());
-    assert_eq!(Path::new(&report.dest), dest.as_path());
+    assert_eq!(
+        fs::canonicalize(&report.dest).expect("report dest"),
+        fs::canonicalize(&dest).expect("dest")
+    );
 
     let headers = inspect_zip_headers(&dest).unwrap();
     let hello = headers
