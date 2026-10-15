@@ -1,16 +1,11 @@
 //! Windows 向け ZIP のファイル名とフラグを自前で扱うコア。
 //!
-//! モジュール境界は `encoding` / `write` / `read` / `split`。実装は PR 1 以降。
+//! モジュール境界は `encoding` / `write` / `read` / `split`。
+//! PR 1 では `encoding` のみ。ZIP の読み書きはまだ持たない。
 
-/// ワークスペースからこの crate がリンクできることを示すプレースホルダ。
-pub fn crate_is_linked() -> bool {
-    true
-}
+pub mod encoding;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn lib_compiles_and_links() {
-        assert!(crate::crate_is_linked());
-    }
-}
+pub use encoding::{
+    decode_name, detect_encoding, encode_entry_name, is_junk, Detection, EncodedName, NameEncoding,
+    Unmappable, UnmappableKind, COMPAT_IDEOGRAPH_REPLACEMENTS, EFS_UTF8_BIT, UNICODE_PATH_EXTRA_ID,
+};
