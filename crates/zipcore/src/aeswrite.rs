@@ -159,7 +159,8 @@ impl<W: Write> Write for Aes256Writer<W> {
 
 impl<W> Drop for Aes256Writer<W> {
     fn drop(&mut self) {
-        self.hmac.take();
+        // Aes256 / HmacSha1 は Zeroize しない。消せるのは counter / xor と、
+        // 派生直後の Zeroizing バッファだけ。
         self.counter.zeroize();
         self.xor.zeroize();
     }

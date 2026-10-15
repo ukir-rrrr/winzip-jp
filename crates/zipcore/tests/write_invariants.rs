@@ -603,9 +603,10 @@ fn aes_tampered_ciphertext_is_rejected() {
     )
     .unwrap_err();
     assert!(
-        !matches!(err, ZipcoreError::EmptyPassword),
-        "tamper must fail decrypt/auth, got {err}"
+        matches!(err, ZipcoreError::Io(_)),
+        "tamper must fail HMAC/auth, got {err:?}"
     );
+    assert_eq!(err.to_string(), "入出力エラー: データが不正です");
     assert!(!dest_out.join("a.txt").exists());
 }
 
