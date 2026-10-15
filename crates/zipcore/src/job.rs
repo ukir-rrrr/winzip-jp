@@ -63,7 +63,8 @@ mod tests {
     fn secret_string_zeroizes() {
         let mut s = SecretString::new("hunter2");
         s.zeroize();
-        assert!(s.expose().is_empty() || s.expose().bytes().all(|b| b == 0));
+        assert!(s.expose().is_empty());
+        // ZeroizeOnDrop は derive。破棄後のバッファはここでは観測できない。
     }
 }
 
