@@ -138,16 +138,18 @@ pub fn build_report(
     }
 }
 
-fn japanese_access_err(err: Option<&str>) -> bool {
+fn sandbox_write_denied(err: Option<&str>) -> bool {
     let err = err.unwrap_or("");
+    if err.contains("見つかりません") {
+        return false;
+    }
     err.contains("権限がありません")
         || err.contains("アクセスできません")
-        || err.contains("見つかりません")
         || err.contains("保存先へ移せませんでした")
 }
 
 /// フィクスチャ読取成功・無関係パス拒否・コンテナ内分割成功。
-/// 外側 dest があるときはカーネル／アプリ層で失敗していること。
+/// 外側 dest があるときは権限／アクセス拒否であること（親無しの NotFound は含めない）。
 pub fn report_passes(report: &ProbeReport) -> bool {
     let deny_err = report.deny.error.as_deref().unwrap_or("");
     if !(report.open.ok
@@ -160,7 +162,7 @@ pub fn report_passes(report: &ProbeReport) -> bool {
     }
     match &report.split_outside {
         None => true,
-        Some(outside) => !outside.ok && japanese_access_err(outside.error.as_deref()),
+        Some(outside) => !outside.ok && sandbox_write_denied(outside.error.as_deref()),
     }
 }
 
@@ -200,11 +202,11 @@ mod tests {
         let report = build_report(&mut sandbox, &zip, &deny, Some(&outside));
         let split = report.split_outside.as_ref().expect("outside");
         assert!(!split.ok, "{split:?}");
+        let err = split.error.as_deref().unwrap_or("");
+        assert!(err.contains("見つかりません"), "{err}");
         assert!(
-            japanese_access_err(split.error.as_deref()),
-            "{:?}",
-            split.error
+            !report_passes(&report),
+            "親無しの NotFound をサンドボックス拒否とみなさない: {report:?}"
         );
-        assert!(report_passes(&report), "{report:?}");
     }
 }
