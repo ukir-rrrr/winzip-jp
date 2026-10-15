@@ -161,13 +161,14 @@ pub fn create_archive_direct(
     if !encrypted && headers.iter().any(|e| e.gpbf & 1 != 0) {
         return Err("パスワードなしの ZIP に暗号フラグが立っています".into());
     }
-    if encrypted
-        && headers
+    if encrypted {
+        let files: Vec<_> = headers
             .iter()
             .filter(|e| !e.name_raw.ends_with(b"/"))
-            .any(|e| e.gpbf & 1 == 0 || !e.has_aes_extra())
-    {
-        return Err("AES ヘッダが不正です".into());
+            .collect();
+        if files.is_empty() || files.iter().any(|e| e.gpbf & 1 == 0 || !e.has_aes_extra()) {
+            return Err("暗号化ヘッダが不正です".into());
+        }
     }
     publish_tmp(&tmp.0, &dest).map_err(publish_err_ja)?;
     Ok(WriteReportDto::from(report).with_dest(&dest))

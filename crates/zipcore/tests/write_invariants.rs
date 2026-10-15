@@ -251,6 +251,29 @@ fn confirmed_replacement_and_collision_suffix() {
 }
 
 #[test]
+fn password_with_only_empty_dirs_is_rejected() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(src.join("空")).unwrap();
+    let dest = tmp.path().join("out.zip");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src,
+            as_dir: true,
+        }],
+        dest: dest.clone(),
+        password: Some(SecretString::new("secret")),
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    let err = write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_err();
+    assert!(matches!(err, ZipcoreError::NoEncryptableFiles));
+    assert_eq!(err.to_string(), "パスワード付きにするファイルがありません");
+    assert!(!dest.exists());
+}
+
+#[test]
 fn empty_directory_is_stored_with_trailing_slash() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("src");

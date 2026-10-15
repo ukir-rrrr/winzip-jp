@@ -122,6 +122,9 @@ pub fn write_zip(
     }
 
     let plan = plan_write(&req)?;
+    if req.password.is_some() && plan.entries.iter().all(|e| e.is_dir) {
+        return Err(ZipcoreError::NoEncryptableFiles);
+    }
     if !plan.issues.is_empty() {
         return Err(ZipcoreError::UnconfirmedReplacements {
             issues: plan.issues,
