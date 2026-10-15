@@ -261,6 +261,19 @@ fn cancel_deletes_container_tmp() {
 }
 
 #[test]
+fn js_cannot_grant_ungranted_paths() {
+    let root = unique_dir("js-grant");
+    let secret = root.join("secret.txt");
+    fs::write(&secret, b"nope").unwrap();
+    let sandbox = Sandbox::new();
+    let accepted =
+        winzip_jp_lib::accepted_dropped_paths(&sandbox, &[secret.to_string_lossy().into_owned()])
+            .unwrap();
+    assert!(accepted.is_empty());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn parent_escape_via_dotdot_is_rejected() {
     let root = unique_dir("escape");
     let allowed = root.join("allowed");

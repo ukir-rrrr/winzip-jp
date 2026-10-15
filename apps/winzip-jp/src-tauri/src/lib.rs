@@ -7,7 +7,7 @@ use tauri::Emitter;
 use tauri::Manager;
 
 pub use commands::{
-    accept_paths, create_archive_direct, extract_archive_direct, list_archive_direct,
+    accepted_dropped_paths, create_archive_direct, extract_archive_direct, list_archive_direct,
     plan_archive_direct, PROGRESS_EVENT,
 };
 pub use dto::{CreateDto, ExtractDto, ListReportDto, WriteReportDto};

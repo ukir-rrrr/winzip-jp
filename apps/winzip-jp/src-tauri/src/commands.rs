@@ -245,15 +245,17 @@ pub fn plan_archive_direct(
     Ok(PlanDto::from_plan(plan, dest_name_hint))
 }
 
-pub fn accept_paths(sandbox: &mut Sandbox, paths: &[String]) -> Result<Vec<String>, String> {
+/// フロントから来たパスは grant しない。許可済みのドロップだけを返す。
+pub fn accepted_dropped_paths(sandbox: &Sandbox, paths: &[String]) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for raw in paths {
         if raw.contains('\0') {
             return Err("パスが不正です".into());
         }
         let abs = zipcore::absolute(&path_buf(raw));
-        sandbox.grant(&abs);
-        out.push(abs.to_string_lossy().into_owned());
+        if sandbox.allows(&abs) {
+            out.push(abs.to_string_lossy().into_owned());
+        }
     }
     Ok(out)
 }
@@ -358,14 +360,11 @@ pub fn cancel_job(state: tauri::State<'_, AppState>) {
 
 #[tauri::command]
 pub fn accept_dropped_paths(
-    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     paths: Vec<String>,
 ) -> Result<Vec<String>, String> {
-    let mut sandbox = lock_sandbox(&state.sandbox)?;
-    let granted = accept_paths(&mut sandbox, &paths)?;
-    extend_fs_scope(&app, &granted.iter().map(PathBuf::from).collect::<Vec<_>>());
-    Ok(granted)
+    let sandbox = lock_sandbox(&state.sandbox)?;
+    accepted_dropped_paths(&sandbox, &paths)
 }
 
 #[tauri::command]

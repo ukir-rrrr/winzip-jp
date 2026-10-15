@@ -94,10 +94,8 @@ export default function App() {
     let cancelled = false;
     let unlistenProgress: (() => void) | undefined;
     let unlistenDrop: (() => void) | undefined;
-    let unlistenWindow: (() => void) | undefined;
     (async () => {
       const { listen } = await import("@tauri-apps/api/event");
-      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
       if (cancelled) {
         return;
       }
@@ -108,13 +106,6 @@ export default function App() {
         setDropped(event.payload);
         setStatus(`${event.payload.length} 件を受け取りました`);
       });
-      unlistenWindow = await getCurrentWebview().onDragDropEvent((event) => {
-        if (event.payload.type === "drop") {
-          const paths = event.payload.paths;
-          setDropped(paths);
-          void invokeCommand("accept_dropped_paths", { paths });
-        }
-      });
     })().catch(() => {
       // プレビューでは Tauri が無い
     });
@@ -122,7 +113,6 @@ export default function App() {
       cancelled = true;
       unlistenProgress?.();
       unlistenDrop?.();
-      unlistenWindow?.();
     };
   }, []);
 
