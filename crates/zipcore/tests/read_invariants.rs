@@ -352,7 +352,8 @@ fn extract_nfd_utf8_name_writes_nfc() {
     )
     .unwrap();
     assert_eq!(fs::read(dest.join(nfc)).unwrap(), b"nfd");
-    if nfd != nfc {
+    // APFS は NFD と NFC を同じファイルと見るので、非 macOS だけで別名の不在を見る。
+    if cfg!(not(target_os = "macos")) {
         assert!(!dest.join(nfd).exists());
     }
 }

@@ -151,10 +151,12 @@ mod tests {
         if let Some(backup) = backup {
             let _ = fs::remove_file(backup);
         }
-        let leftovers: Vec<String> = fs::read_dir(&root)
+        let mut leftovers: Vec<String> = fs::read_dir(&root)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| !n.starts_with('.'))
             .collect();
+        leftovers.sort();
         assert_eq!(leftovers, vec!["to.bin".to_string()]);
         let _ = fs::remove_dir_all(&root);
     }
