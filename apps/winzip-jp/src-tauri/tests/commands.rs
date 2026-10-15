@@ -188,7 +188,7 @@ fn create_archive_writes_replaced_name_as_cp932() {
         .iter()
         .find(|e| !e.name_raw.ends_with(b"/"))
         .expect("file entry");
-    assert_eq!(hex(&entry.name_raw), hex(&encode_entry_name("高.png").cp932));
+    assert_eq!(hex(&entry.name_raw), "8D822E706E67");
     assert_eq!(entry.gpbf & EFS_UTF8_BIT, 0);
     let _ = fs::remove_dir_all(&root);
 }

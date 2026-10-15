@@ -21,6 +21,7 @@ export default function App() {
   const job = useAppStore((s) => s.job);
   const encodingOverride = useAppStore((s) => s.encodingOverride);
   const isCreate = mode === "create";
+  const modalOpen = sheet === "open" || job !== null;
 
   useEffect(() => {
     if (!hasTauri()) {
@@ -71,7 +72,7 @@ export default function App() {
 
   return (
     <Box className="shell" data-ui data-mode={mode} data-testid="app-shell">
-      <Box component="header" className="toolbar">
+      <Box component="header" className="toolbar" inert={modalOpen}>
         <Title order={1} className="app-title">
           {COPY.appTitle}
         </Title>
@@ -120,26 +121,28 @@ export default function App() {
           data-mode={mode}
           aria-label={isCreate ? COPY.dropCreate : COPY.dropExtract}
         >
-          {isCreate ? (
-            <CreateScreen
-              plan={plan}
-              error={error}
-              canCreate={sheet !== "open"}
-              onPick={() => void useAppStore.getState().pickInputs()}
-              onCreate={() => void useAppStore.getState().createZip()}
-              onReset={() => useAppStore.getState().resetWork()}
-            />
-          ) : (
-            <ExtractScreen
-              list={list}
-              error={error}
-              encoding={encodingOverride}
-              onPick={() => void useAppStore.getState().pickInputs()}
-              onExtract={() => void useAppStore.getState().extractZip()}
-              onReset={() => useAppStore.getState().resetWork()}
-              onEncoding={(encoding) => void useAppStore.getState().setEncoding(encoding)}
-            />
-          )}
+          <div inert={modalOpen}>
+            {isCreate ? (
+              <CreateScreen
+                plan={plan}
+                error={error}
+                canCreate={sheet !== "open"}
+                onPick={() => void useAppStore.getState().pickInputs()}
+                onCreate={() => void useAppStore.getState().createZip()}
+                onReset={() => useAppStore.getState().resetWork()}
+              />
+            ) : (
+              <ExtractScreen
+                list={list}
+                error={error}
+                encoding={encodingOverride}
+                onPick={() => void useAppStore.getState().pickInputs()}
+                onExtract={() => void useAppStore.getState().extractZip()}
+                onReset={() => useAppStore.getState().resetWork()}
+                onEncoding={(encoding) => void useAppStore.getState().setEncoding(encoding)}
+              />
+            )}
+          </div>
           {sheet === "open" && issues.length > 0 ? (
             <UnmappableSheet
               issues={issues}
