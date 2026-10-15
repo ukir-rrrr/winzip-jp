@@ -302,13 +302,14 @@ fn publish_across_volumes_with(
         Ok(()) => {
             if let Err(e) = sync_file(dest) {
                 discard_tmp(tmp);
-                return Err(match backup {
-                    Some(bak) => PublishError::BackupKept {
+                return match backup {
+                    Some(bak) => Err(PublishError::BackupKept {
                         source: e,
                         backup: bak,
-                    },
-                    None => e.into(),
-                });
+                    }),
+                    // dest はもともと無く、新しい ZIP は既にある。
+                    None => Ok(()),
+                };
             }
             discard_tmp(tmp);
             if let Some(bak) = backup {
