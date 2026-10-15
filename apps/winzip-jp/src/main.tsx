@@ -13,7 +13,7 @@ import "@mantine/core/styles/Text.css";
 async function boot() {
   if (import.meta.env.VITE_E2E === "1") {
     const { installE2eHarness } = await import("./e2e/harness");
-    installE2eHarness();
+    await installE2eHarness();
   }
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

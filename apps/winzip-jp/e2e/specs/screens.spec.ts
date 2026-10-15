@@ -59,7 +59,6 @@ describe("画面 S1–S8", () => {
     await openScene("s3");
     await $("[data-testid='btn-confirm-replace']").click();
     await $("[data-testid='progress-overlay']").waitForDisplayed();
-    await openScene("s4");
     await expect($("[data-testid='progress-text']")).toHaveText(
       expect.stringContaining("開始しています"),
     );

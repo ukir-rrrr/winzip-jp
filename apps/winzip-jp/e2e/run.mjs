@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import http from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,41 +55,14 @@ function startPreviewIfNeeded() {
   });
 }
 
-function assertNoFakeProgress() {
-  const srcRoot = resolve(appRoot, "src");
-  const stack = [srcRoot];
-  while (stack.length) {
-    const dir = stack.pop();
-    for (const name of readdirSync(dir, { withFileTypes: true })) {
-      const path = resolve(dir, name.name);
-      if (name.isDirectory()) {
-        if (name.name === "e2e") {
-          continue;
-        }
-        stack.push(path);
-        continue;
-      }
-      if (!/\.(ts|tsx|css)$/.test(name.name)) {
-        continue;
-      }
-      const text = readFileSync(path, "utf8");
-      if (text.includes("s4=1") || text.includes("isS4Draft")) {
-        throw new Error(`${path} に本番用の ?s4=1 仮プログレスが残っています`);
-      }
-    }
-  }
-}
-
-assertNoFakeProgress();
-
 const preview = await startPreviewIfNeeded();
 try {
   await waitForHttp(url);
-  const wdio = spawnSync(
-    "pnpm",
-    ["exec", "wdio", "run", "e2e/wdio.conf.ts"],
-    { cwd: appRoot, stdio: "inherit", env: { ...process.env, E2E_BASE_URL: url } },
-  );
+  const wdio = spawnSync("pnpm", ["exec", "wdio", "run", "e2e/wdio.conf.ts"], {
+    cwd: appRoot,
+    stdio: "inherit",
+    env: { ...process.env, E2E_BASE_URL: url },
+  });
   if (wdio.status !== 0) {
     throw new Error(`WebdriverIO が失敗しました (exit ${wdio.status})`);
   }

@@ -1,4 +1,4 @@
-import type { ListReport, PlanDto, ProgressDto } from "../types";
+import type { ListReport, PlanDto } from "../types";
 
 export const S2_PLAN: PlanDto = {
   entries: ["keep.txt", "nested/", "nested/ok.txt"],
@@ -55,15 +55,6 @@ export const S7_LIST: ListReport = {
   encoding: "utf8",
   confidence: 0.8,
   ambiguous: false,
-};
-
-export const STARTING: ProgressDto = {
-  phase: "starting",
-  currentEntry: null,
-  entriesDone: 0,
-  entriesTotal: 2,
-  bytesDone: 0,
-  bytesTotal: 120,
 };
 
 export const E2E_CREATE_DEST = "/tmp/e2e/送り.zip";

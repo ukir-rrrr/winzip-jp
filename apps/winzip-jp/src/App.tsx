@@ -15,13 +15,10 @@ export default function App() {
   const plan = useAppStore((s) => s.plan);
   const list = useAppStore((s) => s.list);
   const error = useAppStore((s) => s.error);
-  const sheetOpen = useAppStore((s) => s.sheetOpen);
+  const sheet = useAppStore((s) => s.sheet);
   const issues = plan?.issues ?? [];
   const replacements = useAppStore((s) => s.replacements);
-  const replacementsConfirmed = useAppStore((s) => s.replacementsConfirmed);
-  const progress = useAppStore((s) => s.progress);
   const job = useAppStore((s) => s.job);
-  const lastDest = useAppStore((s) => s.lastDest);
   const encodingOverride = useAppStore((s) => s.encodingOverride);
   const isCreate = mode === "create";
 
@@ -119,7 +116,7 @@ export default function App() {
             <CreateScreen
               plan={plan}
               error={error}
-              canCreate={!plan || plan.issues.length === 0 || replacementsConfirmed}
+              canCreate={sheet !== "open" && sheet !== "dismissed"}
               onPick={() => void useAppStore.getState().pickInputs()}
               onCreate={() => void useAppStore.getState().createZip()}
               onReset={() => useAppStore.getState().resetWork()}
@@ -135,7 +132,7 @@ export default function App() {
               onEncoding={(encoding) => void useAppStore.getState().setEncoding(encoding)}
             />
           )}
-          {sheetOpen && issues.length > 0 ? (
+          {sheet === "open" && issues.length > 0 ? (
             <UnmappableSheet
               issues={issues}
               replacements={replacements}
@@ -144,11 +141,11 @@ export default function App() {
               onDismiss={() => useAppStore.getState().dismissSheet()}
             />
           ) : null}
-          {job && progress ? (
+          {job ? (
             <ProgressOverlay
-              progress={progress}
-              job={job}
-              dest={lastDest}
+              progress={job.progress}
+              job={job.kind}
+              dest={job.dest}
               onCancel={() => void useAppStore.getState().cancel()}
               onClose={() => useAppStore.getState().closeJob()}
             />

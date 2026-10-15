@@ -2,32 +2,37 @@ import { create } from "zustand";
 import { getApi } from "./api";
 import { COPY } from "./copy";
 import type {
+  ExtractReport,
   ListReport,
   Mode,
   NameEncoding,
   PlanDto,
   ProgressDto,
   Unmappable,
+  WriteReport,
 } from "./types";
 
-export type JobKind = "create" | "extract" | null;
+export type JobKind = "create" | "extract";
+
+export type Job = {
+  kind: JobKind;
+  progress: ProgressDto;
+  dest: string | null;
+};
+
+export type Sheet = "none" | "open" | "dismissed" | "confirmed";
 
 export type AppState = {
   mode: Mode;
   dropped: string[];
   plan: PlanDto | null;
   replacements: Record<string, string>;
-  replacementsConfirmed: boolean;
-  sheetOpen: boolean;
+  sheet: Sheet;
   list: ListReport | null;
   archivePath: string | null;
   encodingOverride: NameEncoding | null;
-  progress: ProgressDto | null;
-  job: JobKind;
-  lastDest: string | null;
-  status: string;
+  job: Job | null;
   error: string;
-  busy: boolean;
   setMode: (mode: Mode) => void;
   setProgress: (progress: ProgressDto) => void;
   resetWork: () => void;
@@ -41,24 +46,6 @@ export type AppState = {
   extractZip: () => Promise<void>;
   cancel: () => Promise<void>;
   closeJob: () => void;
-  applyScene: (partial: Partial<Pick<
-    AppState,
-    | "mode"
-    | "dropped"
-    | "plan"
-    | "replacements"
-    | "replacementsConfirmed"
-    | "sheetOpen"
-    | "list"
-    | "archivePath"
-    | "encodingOverride"
-    | "progress"
-    | "job"
-    | "lastDest"
-    | "status"
-    | "error"
-    | "busy"
-  >>) => void;
 };
 
 function errText(err: unknown): string {
@@ -95,261 +82,225 @@ function destHint(plan: PlanDto | null, fallback: string): string {
   return fallback;
 }
 
+function startingProgress(): ProgressDto {
+  return {
+    phase: "starting",
+    currentEntry: null,
+    entriesDone: 0,
+    entriesTotal: 0,
+    bytesDone: 0,
+    bytesTotal: 0,
+  };
+}
+
+function doneProgress(entries: number, bytes: number): ProgressDto {
+  return {
+    phase: "done",
+    currentEntry: null,
+    entriesDone: entries,
+    entriesTotal: entries,
+    bytesDone: bytes,
+    bytesTotal: bytes,
+  };
+}
+
+function jobInFlight(job: Job | null): boolean {
+  return job !== null && job.progress.phase !== "done";
+}
+
 const emptyWork = {
   dropped: [] as string[],
   plan: null as PlanDto | null,
   replacements: {} as Record<string, string>,
-  replacementsConfirmed: true,
-  sheetOpen: false,
+  sheet: "none" as Sheet,
   list: null as ListReport | null,
   archivePath: null as string | null,
   encodingOverride: null as NameEncoding | null,
-  progress: null as ProgressDto | null,
-  job: null as JobKind,
-  lastDest: null as string | null,
-  status: "",
+  job: null as Job | null,
   error: "",
-  busy: false,
 };
 
-export const useAppStore = create<AppState>((set, get) => ({
-  mode: "create",
-  ...emptyWork,
-
-  setMode(mode) {
-    if (get().busy && get().job) {
-      return;
-    }
-    set({ mode, ...emptyWork });
-  },
-
-  setProgress(progress) {
-    set({ progress });
-  },
-
-  resetWork() {
-    set({ ...emptyWork });
-  },
-
-  applyScene(partial) {
-    set(partial);
-  },
-
-  async ingestDropped(paths) {
-    const usable = paths.filter(Boolean);
-    if (usable.length === 0) {
-      set({ error: get().mode === "create" ? COPY.noFiles : COPY.noZip });
-      return;
-    }
+export const useAppStore = create<AppState>((set, get) => {
+  async function runJob(
+    kind: JobKind,
+    pickDest: () => Promise<string | null>,
+    run: (dest: string) => Promise<WriteReport | ExtractReport>,
+    noDest: string,
+  ): Promise<void> {
     set({
-      dropped: usable,
       error: "",
-      status: "",
-      lastDest: null,
-      progress: null,
-      job: null,
+      job: { kind, progress: startingProgress(), dest: null },
     });
-    const api = getApi();
-    if (get().mode === "create") {
-      set({ busy: true });
-      try {
-        const plan = await api.planArchive(usable);
-        const issues = plan.issues ?? [];
-        set({
-          plan,
-          replacements: defaultReplacements(issues),
-          replacementsConfirmed: issues.length === 0,
-          sheetOpen: issues.length > 0,
-          list: null,
-          archivePath: null,
-        });
-      } catch (err) {
-        set({ plan: null, error: errText(err) });
-      } finally {
-        set({ busy: false });
+    try {
+      const dest = await pickDest();
+      if (!dest) {
+        set({ error: noDest, job: null });
+        return;
       }
-      return;
-    }
-    const archive = firstZip(usable);
-    if (!archive) {
-      set({ error: COPY.noZip });
-      return;
-    }
-    set({ busy: true, archivePath: archive });
-    try {
-      const list = await api.listArchive(archive, get().encodingOverride);
-      set({ list, plan: null, sheetOpen: false });
+      const report = await run(dest);
+      set({
+        job: { kind, dest: report.dest, progress: doneProgress(report.entriesWritten, report.bytesWritten) },
+      });
     } catch (err) {
-      set({ list: null, error: errText(err) });
-    } finally {
-      set({ busy: false });
+      set({ error: errText(err), job: null });
     }
-  },
+  }
 
-  async pickInputs() {
-    try {
-      const paths = await getApi().pickFiles();
-      if (paths.length === 0) {
+  return {
+    mode: "create",
+    ...emptyWork,
+
+    setMode(mode) {
+      if (jobInFlight(get().job)) {
+        return;
+      }
+      set({ mode, ...emptyWork });
+    },
+
+    setProgress(progress) {
+      const job = get().job;
+      if (!job) {
+        return;
+      }
+      set({ job: { ...job, progress } });
+    },
+
+    resetWork() {
+      set({ ...emptyWork });
+    },
+
+    async ingestDropped(paths) {
+      if (jobInFlight(get().job)) {
+        return;
+      }
+      const usable = paths.filter(Boolean);
+      if (usable.length === 0) {
         set({ error: get().mode === "create" ? COPY.noFiles : COPY.noZip });
         return;
       }
-      await get().ingestDropped(paths);
-    } catch (err) {
-      set({ error: errText(err) });
-    }
-  },
-
-  updateReplacement(relativePath, suggested) {
-    set({
-      replacements: { ...get().replacements, [relativePath]: suggested },
-      replacementsConfirmed: false,
-    });
-  },
-
-  dismissSheet() {
-    set({ sheetOpen: false, replacementsConfirmed: false });
-  },
-
-  async confirmAndCreate() {
-    const { plan } = get();
-    if (!plan) {
-      return;
-    }
-    set({ replacementsConfirmed: true, sheetOpen: false });
-    await get().createZip();
-  },
-
-  async createZip() {
-    const { dropped, plan, replacements, replacementsConfirmed } = get();
-    if (dropped.length === 0) {
-      set({ error: COPY.noFiles });
-      return;
-    }
-    if (plan && plan.issues.length > 0 && !replacementsConfirmed) {
-      set({ sheetOpen: true, error: COPY.needConfirm });
-      return;
-    }
-    set({
-      busy: true,
-      error: "",
-      status: "",
-      job: "create",
-      progress: {
-        phase: "starting",
-        currentEntry: null,
-        entriesDone: 0,
-        entriesTotal: 0,
-        bytesDone: 0,
-        bytesTotal: 0,
-      },
-    });
-    try {
-      const dest = await getApi().pickSaveZip(destHint(plan, "archive.zip"));
-      if (!dest) {
-        set({ error: COPY.noDest, busy: false, job: null });
+      set({ dropped: usable, error: "", job: null });
+      const api = getApi();
+      if (get().mode === "create") {
+        try {
+          const plan = await api.planArchive(usable);
+          const issues = plan.issues ?? [];
+          set({
+            plan,
+            replacements: defaultReplacements(issues),
+            sheet: issues.length > 0 ? "open" : "none",
+            list: null,
+            archivePath: null,
+          });
+        } catch (err) {
+          set({ plan: null, sheet: "none", error: errText(err) });
+        }
         return;
       }
-      const report = await getApi().createArchive({ paths: dropped, replacements }, dest);
-      set({
-        lastDest: report.dest,
-        status: COPY.created,
-        progress: {
-          phase: "done",
-          currentEntry: null,
-          entriesDone: report.entriesWritten,
-          entriesTotal: report.entriesWritten,
-          bytesDone: report.bytesWritten,
-          bytesTotal: report.bytesWritten,
-        },
-      });
-    } catch (err) {
-      set({ error: errText(err), job: null, progress: null });
-    } finally {
-      set({ busy: false });
-    }
-  },
-
-  async setEncoding(encoding) {
-    const archive = get().archivePath;
-    if (!archive) {
-      set({ encodingOverride: encoding });
-      return;
-    }
-    set({ encodingOverride: encoding, busy: true, error: "" });
-    try {
-      const list = await getApi().listArchive(archive, encoding);
-      set({ list });
-    } catch (err) {
-      set({ error: errText(err) });
-    } finally {
-      set({ busy: false });
-    }
-  },
-
-  async extractZip() {
-    const archive = get().archivePath ?? firstZip(get().dropped);
-    if (!archive) {
-      set({ error: COPY.noZip });
-      return;
-    }
-    set({
-      busy: true,
-      error: "",
-      status: "",
-      job: "extract",
-      archivePath: archive,
-      progress: {
-        phase: "starting",
-        currentEntry: null,
-        entriesDone: 0,
-        entriesTotal: 0,
-        bytesDone: 0,
-        bytesTotal: 0,
-      },
-    });
-    try {
-      const dest = await getApi().pickExtractDir();
-      if (!dest) {
-        set({ error: COPY.noExtractDest, busy: false, job: null });
+      const archive = firstZip(usable);
+      if (!archive) {
+        set({ error: COPY.noZip });
         return;
       }
-      const report = await getApi().extractArchive({
-        archive,
-        dest,
-        encoding: get().encodingOverride,
-        overwrite: false,
-      });
+      try {
+        const list = await api.listArchive(archive, get().encodingOverride);
+        set({ list, plan: null, sheet: "none", archivePath: archive });
+      } catch (err) {
+        set({ list: null, error: errText(err) });
+      }
+    },
+
+    async pickInputs() {
+      try {
+        const paths = await getApi().pickFiles();
+        if (paths.length === 0) {
+          set({ error: get().mode === "create" ? COPY.noFiles : COPY.noZip });
+          return;
+        }
+        await get().ingestDropped(paths);
+      } catch (err) {
+        set({ error: errText(err) });
+      }
+    },
+
+    updateReplacement(relativePath, suggested) {
       set({
-        lastDest: report.dest,
-        status: COPY.extracted,
-        progress: {
-          phase: "done",
-          currentEntry: null,
-          entriesDone: report.entriesWritten,
-          entriesTotal: report.entriesWritten,
-          bytesDone: report.bytesWritten,
-          bytesTotal: report.bytesWritten,
-        },
+        replacements: { ...get().replacements, [relativePath]: suggested },
+        sheet: "open",
       });
-    } catch (err) {
-      set({ error: errText(err), job: null, progress: null });
-    } finally {
-      set({ busy: false });
-    }
-  },
+    },
 
-  async cancel() {
-    await getApi().cancelJob();
-    set({
-      busy: false,
-      job: null,
-      progress: null,
-      status: "",
-      error: COPY.cancelled,
-    });
-  },
+    dismissSheet() {
+      set({ sheet: "dismissed" });
+    },
 
-  closeJob() {
-    set({ job: null, progress: null });
-  },
-}));
+    async confirmAndCreate() {
+      if (!get().plan) {
+        return;
+      }
+      set({ sheet: "confirmed" });
+      await get().createZip();
+    },
+
+    async createZip() {
+      const { dropped, plan, replacements, sheet } = get();
+      if (dropped.length === 0) {
+        set({ error: COPY.noFiles });
+        return;
+      }
+      if (plan && plan.issues.length > 0 && sheet !== "confirmed") {
+        set({ sheet: "open", error: COPY.needConfirm });
+        return;
+      }
+      await runJob(
+        "create",
+        () => getApi().pickSaveZip(destHint(plan, "archive.zip")),
+        (dest) => getApi().createArchive({ paths: dropped, replacements }, dest),
+        COPY.noDest,
+      );
+    },
+
+    async setEncoding(encoding) {
+      const archive = get().archivePath;
+      if (!archive) {
+        set({ encodingOverride: encoding });
+        return;
+      }
+      set({ encodingOverride: encoding, error: "" });
+      try {
+        set({ list: await getApi().listArchive(archive, encoding) });
+      } catch (err) {
+        set({ error: errText(err) });
+      }
+    },
+
+    async extractZip() {
+      const archive = get().archivePath ?? firstZip(get().dropped);
+      if (!archive) {
+        set({ error: COPY.noZip });
+        return;
+      }
+      set({ archivePath: archive });
+      await runJob(
+        "extract",
+        () => getApi().pickExtractDir(),
+        (dest) =>
+          getApi().extractArchive({
+            archive,
+            dest,
+            encoding: get().encodingOverride,
+            overwrite: false,
+          }),
+        COPY.noExtractDest,
+      );
+    },
+
+    async cancel() {
+      await getApi().cancelJob();
+      set({ job: null, error: COPY.cancelled });
+    },
+
+    closeJob() {
+      set({ job: null });
+    },
+  };
+});
