@@ -211,7 +211,6 @@ fn write_plan_to_path(
                 let _ = fs::remove_file(&partial);
                 return Err(e.into());
             }
-            split::discard_stale_volumes(dest, 1);
             Ok(report)
         }
         Err(e) => {

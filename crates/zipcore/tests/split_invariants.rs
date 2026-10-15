@@ -231,6 +231,30 @@ fn split_smaller_than_limit_is_single_zip() {
 }
 
 #[test]
+fn non_split_save_does_not_delete_neighbor_z01() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("a.txt"), b"a");
+    let dest = tmp.path().join("out.zip");
+    let z01 = dest.with_file_name("out.z01");
+    fs::write(&z01, b"keep me").unwrap();
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src.join("a.txt"),
+            as_dir: false,
+        }],
+        dest: dest.clone(),
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    write_zip(req, |_| {}, &AtomicBool::new(false)).expect("single");
+    assert_eq!(fs::read(&z01).unwrap(), b"keep me");
+    assert!(dest.exists());
+}
+
+#[test]
 fn leftover_split_pieces_do_not_spoil_later_single_zip() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("src");
@@ -271,7 +295,7 @@ fn leftover_split_pieces_do_not_spoil_later_single_zip() {
         replacements: BTreeMap::new(),
     };
     write_zip(req2, |_| {}, &AtomicBool::new(false)).expect("single");
-    assert!(!z01.exists(), "stale z01 must be removed on overwrite");
+    assert!(z01.exists(), "non-split must not delete neighbor z01");
     fs::write(&z01, b"stale leftover").unwrap();
     let headers = inspect_zip_headers(&dest).unwrap();
     let file = headers

@@ -693,7 +693,7 @@ fn create_split_writes_z01_and_zip_with_cp932_names() {
         &AtomicBool::new(false),
     )
     .expect("overwrite without split");
-    assert!(!z01.exists(), "stale z01 must be removed");
+    assert!(z01.exists(), "non-split must not delete neighbor z01");
     let headers = inspect_zip_headers(&dest).unwrap();
     let file = headers
         .iter()

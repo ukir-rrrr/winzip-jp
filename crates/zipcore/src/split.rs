@@ -147,12 +147,15 @@ fn last_zip_this_disk(zip_path: &Path) -> Option<u16> {
     ))
 }
 
-/// 今回のセットに含まれない `dest.zNN` を消す。キャンセルでは呼ばない。
+/// 分割保存のあと、今回のセットに含まれない `dest.zNN` を消す。キャンセルでは呼ばない。
 /// `{stem}.zNN` は別アーカイブではなく、その `{stem}.zip` の分割ピース。
-/// `other.zip` のピースは触らない。保存先の上書きはセット全体の置き換えなので確認は挟まない。
+/// `other.zip` のピースは触らない。非分割の保存では呼ばない（隣のファイルを消さない）。
 /// 読み取りは EOCD の ThisDisk で兄弟を切るので、消し損なっても新しい ZIP は読める。
 pub fn discard_stale_volumes(dest: &Path, keep_count: u32) {
-    let keep = final_volume_paths(dest, keep_count.max(1));
+    if keep_count <= 1 {
+        return;
+    }
+    let keep = final_volume_paths(dest, keep_count);
     for i in 1..=MAX_PIECES {
         let p = volume_path(dest, i, false);
         if keep.iter().any(|k| path_eq(k, &p)) {
@@ -787,6 +790,18 @@ mod tests {
         assert_eq!(fs::read(tmp.path().join("other.z01")).unwrap(), b"keep");
         assert!(pieces[0].exists());
         assert!(dest.exists());
+    }
+
+    #[test]
+    fn discard_stale_volumes_skips_non_split() {
+        let tmp = TempDir::new();
+        let dest = tmp.path().join("out.zip");
+        fs::write(&dest, b"zip").unwrap();
+        let z01 = tmp.path().join("out.z01");
+        fs::write(&z01, b"keep").unwrap();
+        discard_stale_volumes(&dest, 1);
+        assert_eq!(fs::read(&z01).unwrap(), b"keep");
+        assert_eq!(fs::read(&dest).unwrap(), b"zip");
     }
 
     #[test]

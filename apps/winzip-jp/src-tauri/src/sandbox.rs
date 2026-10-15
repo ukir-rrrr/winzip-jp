@@ -309,8 +309,10 @@ pub fn publish_tmp_set(tmp_vols: &[PathBuf], dest_vols: &[PathBuf]) -> Result<()
     for (_, bak) in backups {
         let _ = fs::remove_file(bak);
     }
-    if let Some(dest) = dest_vols.last() {
-        split::discard_stale_volumes(dest, dest_vols.len() as u32);
+    if dest_vols.len() > 1 {
+        if let Some(dest) = dest_vols.last() {
+            split::discard_stale_volumes(dest, dest_vols.len() as u32);
+        }
     }
     Ok(())
 }
