@@ -290,6 +290,7 @@ fn publish_across_volumes_with(
     let backup = if dest.exists() {
         let bak = container_tmp_zip();
         if let Err(e) = fs::copy(dest, &bak) {
+            let _ = fs::remove_file(&bak);
             discard_tmp(tmp);
             return Err(e.into());
         }
