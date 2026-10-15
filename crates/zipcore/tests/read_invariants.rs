@@ -235,6 +235,32 @@ fn extract_utf8_efs_fixture_writes_unicode_names_and_bytes() {
     assert_eq!(fs::read(dest.join("ドキュメント.txt")).unwrap(), b"docs\n");
 }
 
+fn assert_extract_invalid(name: &[u8]) {
+    let tmp = support::TempDir::new();
+    let zip = tmp.path().join("bad.zip");
+    write_stored_zip(&zip, &[(name, b"x", 0)]);
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(&dest).unwrap();
+    let err = extract_zip(
+        extract_req(zip.clone(), dest.clone(), false),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, ZipcoreError::UnsupportedEntry { .. }),
+        "name {} err={err}",
+        hex(name)
+    );
+    assert!(!err.to_string().contains("展開先の外"));
+    let list_err = list_zip(ListRequest {
+        archive: zip,
+        encoding: None,
+    })
+    .unwrap_err();
+    assert!(matches!(list_err, ZipcoreError::UnsupportedEntry { .. }));
+}
+
 fn assert_extract_traversal(name: &[u8]) {
     let tmp = support::TempDir::new();
     let zip = tmp.path().join("evil.zip");
@@ -421,14 +447,20 @@ fn extract_rejects_backslash_escape() {
 
 #[test]
 fn extract_rejects_nul() {
-    assert_extract_traversal(b"ok\0evil");
+    assert_extract_invalid(b"ok\0evil");
 }
 
 #[test]
 fn extract_rejects_empty_and_dot_only_names() {
-    assert_extract_traversal(b"");
-    assert_extract_traversal(b".");
-    assert_extract_traversal(b"././.");
+    assert_extract_invalid(b"");
+    assert_extract_invalid(b".");
+    assert_extract_invalid(b"././.");
+}
+
+#[test]
+fn extract_rejects_reserved_dos_name() {
+    assert_extract_invalid(b"CON.txt");
+    assert_extract_invalid(b"NUL");
 }
 
 #[test]

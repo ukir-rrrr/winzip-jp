@@ -10,6 +10,7 @@ pub mod write;
 mod error;
 mod fsutil;
 mod job;
+mod pathpolicy;
 mod pkzip;
 
 pub use encoding::{

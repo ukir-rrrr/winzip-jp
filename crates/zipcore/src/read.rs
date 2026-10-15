@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -15,6 +15,7 @@ use crate::encoding::{decode_name, detect_encoding, Detection, NameEncoding};
 use crate::error::ZipcoreError;
 use crate::fsutil::{absolute, path_eq, replace_keeping_backup, stays_under};
 use crate::job::{check_cancel, Progress, ProgressPhase, SecretString};
+use crate::pathpolicy::{classify_name, unsafe_component, zip_name_is_dir, NameReject};
 
 const COPY_BUF: usize = 64 * 1024;
 const MAX_ENTRIES: usize = 65_535;
@@ -398,10 +399,8 @@ fn catalog_archive(
     let mut dests = DestSet::default();
     for raw in raw_entries {
         let display_name: String = decode_name(&raw.name_raw, encoding).nfc().collect();
-        if unsafe_entry_reason(&raw.name_raw, &display_name).is_some() {
-            return Err(ZipcoreError::PathTraversal {
-                entry: display_name,
-            });
+        if let Some(kind) = classify_name(&raw.name_raw, &display_name) {
+            return Err(name_reject_error(display_name, kind));
         }
         if raw.is_symlink {
             return Err(ZipcoreError::PathTraversal {
@@ -509,6 +508,16 @@ fn dest_conflict(display_name: &str) -> ZipcoreError {
     ZipcoreError::Corrupt(format!(
         "同じ展開先に複数のエントリがあります: {display_name}"
     ))
+}
+
+fn name_reject_error(entry: String, kind: NameReject) -> ZipcoreError {
+    match kind {
+        NameReject::Escape => ZipcoreError::PathTraversal { entry },
+        NameReject::Invalid(reason) => ZipcoreError::UnsupportedEntry {
+            entry,
+            reason: reason.to_string(),
+        },
+    }
 }
 
 fn dest_type_conflict(display_name: &str) -> ZipcoreError {
@@ -630,191 +639,6 @@ fn join_under_dest(
     Ok(current)
 }
 
-/// raw と表示名の両方を見る。区切りは ASCII の `/` と、CP932 の 2 バイト目ではない `\`。
-pub(crate) fn unsafe_entry_reason(raw: &[u8], display: &str) -> Option<&'static str> {
-    if raw.contains(&0) || display.contains('\0') {
-        return Some("NUL文字");
-    }
-    let unified = display.replace('\\', "/");
-    let trimmed = unified.trim_matches('/');
-    if trimmed.is_empty() || trimmed.split('/').all(|c| c.is_empty() || c == ".") {
-        return Some("空の名前");
-    }
-    if raw_escapes(raw) {
-        return Some("不正な区切り");
-    }
-    if display_escapes(display) {
-        return Some("不正な名前");
-    }
-    None
-}
-
-fn is_cp932_lead(b: u8) -> bool {
-    (0x81..=0x9F).contains(&b) || (0xE0..=0xFC).contains(&b)
-}
-
-fn is_cp932_trail(b: u8) -> bool {
-    (0x40..=0x7E).contains(&b) || (0x80..=0xFC).contains(&b)
-}
-
-/// CP932 の 2 バイト文字を 1 単位として進める。
-fn next_raw_unit(raw: &[u8], i: usize) -> usize {
-    if i + 1 < raw.len() && is_cp932_lead(raw[i]) && is_cp932_trail(raw[i + 1]) {
-        2
-    } else {
-        1
-    }
-}
-
-/// 末尾 `/`、または先頭から見たとき単独バイトの末尾 `\` だけをディレクトリとみなす。
-fn zip_name_is_dir(raw: &[u8]) -> bool {
-    if raw.ends_with(b"/") {
-        return true;
-    }
-    if !raw.ends_with(b"\\") {
-        return false;
-    }
-    let mut i = 0;
-    let mut last_start = 0;
-    while i < raw.len() {
-        last_start = i;
-        i += next_raw_unit(raw, i);
-    }
-    last_start + 1 == raw.len() && raw[last_start] == b'\\'
-}
-
-fn for_each_raw_component(raw: &[u8], mut visit: impl FnMut(&[u8]) -> bool) -> bool {
-    let mut i = 0;
-    let mut start = 0;
-    while i < raw.len() {
-        let step = next_raw_unit(raw, i);
-        if step == 1 && (raw[i] == b'/' || raw[i] == b'\\') {
-            if visit(&raw[start..i]) {
-                return true;
-            }
-            start = i + 1;
-        }
-        i += step;
-    }
-    visit(&raw[start..])
-}
-
-fn raw_has_ascii_colon(raw: &[u8]) -> bool {
-    let mut i = 0;
-    while i < raw.len() {
-        let step = next_raw_unit(raw, i);
-        if step == 1 && raw[i] == b':' {
-            return true;
-        }
-        i += step;
-    }
-    false
-}
-
-fn raw_escapes(raw: &[u8]) -> bool {
-    if raw.is_empty() {
-        return false;
-    }
-    if raw[0] == b'/' || raw[0] == b'\\' {
-        return true;
-    }
-    if raw_has_ascii_colon(raw) {
-        return true;
-    }
-    for_each_raw_component(raw, |part| {
-        part == b".." || part.contains(&0) || is_reserved_dos_bytes(part)
-    })
-}
-
-fn display_escapes(name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-    let unified = name.replace('\\', "/");
-    if unified.starts_with('/') {
-        return true;
-    }
-    if looks_like_drive(&unified) {
-        return true;
-    }
-    for component in Path::new(&unified).components() {
-        match component {
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return true,
-            Component::Normal(s) => {
-                let t = s.to_string_lossy();
-                if unsafe_component(&t) {
-                    return true;
-                }
-            }
-            Component::CurDir => {}
-        }
-    }
-    unified
-        .split('/')
-        .filter(|c| !c.is_empty() && *c != ".")
-        .any(unsafe_component)
-}
-
-fn unsafe_component(component: &str) -> bool {
-    if component == "." {
-        return false;
-    }
-    if component.is_empty() || component == ".." {
-        return true;
-    }
-    if component.contains('\0')
-        || component.contains('\\')
-        || component.contains('/')
-        || component.contains(':')
-    {
-        return true;
-    }
-    if is_reserved_dos_name(component) {
-        return true;
-    }
-    let trimmed = component.trim_end_matches([' ', '.']);
-    trimmed.is_empty() || trimmed != component
-}
-
-fn looks_like_drive(s: &str) -> bool {
-    let b = s.as_bytes();
-    b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic()
-}
-
-fn is_reserved_dos_name(name: &str) -> bool {
-    let stem = name.split('.').next().unwrap_or(name);
-    matches!(
-        stem.to_ascii_uppercase().as_str(),
-        "CON"
-            | "PRN"
-            | "AUX"
-            | "NUL"
-            | "COM1"
-            | "COM2"
-            | "COM3"
-            | "COM4"
-            | "COM5"
-            | "COM6"
-            | "COM7"
-            | "COM8"
-            | "COM9"
-            | "LPT1"
-            | "LPT2"
-            | "LPT3"
-            | "LPT4"
-            | "LPT5"
-            | "LPT6"
-            | "LPT7"
-            | "LPT8"
-            | "LPT9"
-    )
-}
-
-fn is_reserved_dos_bytes(part: &[u8]) -> bool {
-    let stem = part.split(|b| *b == b'.').next().unwrap_or(part);
-    is_reserved_dos_name(&String::from_utf8_lossy(stem))
-}
-
 fn is_zip_bomb(compressed: u64, uncompressed: u64) -> bool {
     if uncompressed <= BOMB_MIN_UNCOMPRESSED {
         return false;
@@ -929,71 +753,4 @@ fn unique_tmp(dest: &Path) -> PathBuf {
         n,
         nanos
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn raw_dotdot_and_slash_are_unsafe() {
-        assert!(unsafe_entry_reason(b"../evil", "../evil").is_some());
-        assert!(unsafe_entry_reason(b"/tmp/evil", "/tmp/evil").is_some());
-        assert!(unsafe_entry_reason(br"C:\evil", r"C:\evil").is_some());
-        assert!(unsafe_entry_reason(br"foo\..\evil", r"foo\..\evil").is_some());
-        assert!(unsafe_entry_reason(b"foo/../bar", "foo/../bar").is_some());
-        assert!(unsafe_entry_reason(b"ok/file.txt", "ok/file.txt").is_none());
-        assert!(unsafe_entry_reason(b"dir/", "dir/").is_none());
-        assert!(unsafe_entry_reason("が.txt".as_bytes(), "が.txt").is_none());
-        assert!(unsafe_entry_reason(b"foo:bar", "foo:bar").is_some());
-        // 表 / ソ の 2 バイト目は 0x5C。区切りと誤認しない。
-        let hyo = [0x95, 0x5C, b'.', b't', b'x', b't'];
-        assert!(
-            unsafe_entry_reason(&hyo, "表.txt").is_none(),
-            "表.txt raw={:02X?}",
-            hyo
-        );
-        let so = [0x83, 0x5C, b'.', b't', b'x', b't'];
-        assert!(
-            unsafe_entry_reason(&so, "ソ.txt").is_none(),
-            "ソ.txt raw={:02X?}",
-            so
-        );
-        let hyo_nul = [0x95, 0x5C, b'N', b'U', b'L', b'.', b't', b'x', b't'];
-        assert!(
-            unsafe_entry_reason(&hyo_nul, "表NUL.txt").is_none(),
-            "表NUL.txt must not look like reserved NUL"
-        );
-        assert!(!zip_name_is_dir(&hyo));
-        assert!(!zip_name_is_dir(&so));
-        assert!(!zip_name_is_dir(&[0x95, 0x5C]));
-        assert!(!zip_name_is_dir(&[0x88, 0x9F]));
-        assert!(zip_name_is_dir(b"dir/"));
-        assert!(zip_name_is_dir(br"dir\"));
-        assert!(zip_name_is_dir(&[0x95, 0x5C, b'\\']));
-        assert!(zip_name_is_dir(&[0x88, 0x9F, b'\\']));
-        assert!(unsafe_entry_reason(b"", "").is_some());
-        assert!(unsafe_entry_reason(b".", ".").is_some());
-        assert!(unsafe_entry_reason(b"././.", "././.").is_some());
-    }
-
-    #[test]
-    fn nul_and_reserved_are_unsafe() {
-        assert!(unsafe_entry_reason(b"a\0b", "a\0b").is_some());
-        assert!(unsafe_entry_reason(b"NUL", "NUL").is_some());
-        assert!(unsafe_entry_reason(b"CON.txt", "CON.txt").is_some());
-        assert!(unsafe_entry_reason(b"hello.txt", "hello.txt").is_none());
-    }
-
-    #[test]
-    fn path_traversal_display_is_japanese() {
-        let err = ZipcoreError::PathTraversal {
-            entry: "foo/../bar".into(),
-        };
-        let text = err.to_string();
-        assert!(text.contains("展開先"), "{text}");
-        assert!(!text.contains("(raw)"), "{text}");
-        assert!(!text.contains("(name)"), "{text}");
-        assert!(!text.contains("(empty)"), "{text}");
-    }
 }
