@@ -57,9 +57,6 @@ fn is_z_digits(rest: &str) -> bool {
 
 /// 保存先 ZIP と同じ場所・同じ stem の `.zNN` ピースか。親フォルダは開かない。
 pub fn is_split_sibling(dest_zip: &Path, candidate: &Path) -> bool {
-    if path_eq(dest_zip, candidate) {
-        return true;
-    }
     let dest_parent = zip_parent(dest_zip);
     let cand_parent = candidate
         .parent()
@@ -675,7 +672,7 @@ mod tests {
         let dest = Path::new("/tmp/out.zip");
         assert!(is_split_sibling(dest, Path::new("/tmp/out.z01")));
         assert!(is_split_sibling(dest, Path::new("/tmp/out.z12")));
-        assert!(is_split_sibling(dest, dest));
+        assert!(!is_split_sibling(dest, dest));
         assert!(!is_split_sibling(dest, Path::new("/tmp/secret.txt")));
         assert!(!is_split_sibling(dest, Path::new("/tmp/out.txt")));
         assert!(!is_split_sibling(dest, Path::new("/tmp/out.z01.exe")));
