@@ -56,10 +56,24 @@ export function isKnownJaMessage(msg: string): boolean {
   return KNOWN_JA_PREFIXES.some((prefix) => msg === prefix || msg.startsWith(prefix));
 }
 
+/** zipcore の Corrupt 文言だけ。パスに EOCD が含まれる場合は触らない。 */
+const JA_ACRONYM_REWRITES: ReadonlyArray<readonly [string, string]> = [
+  ["EOCD 署名がありません", "中央ディレクトリ終端の署名がありません"],
+  ["EOCD が見つかりません", "中央ディレクトリ終端が見つかりません"],
+];
+
+export function toUiJa(msg: string): string {
+  let out = msg;
+  for (const [from, to] of JA_ACRONYM_REWRITES) {
+    out = out.replaceAll(from, to);
+  }
+  return out;
+}
+
 export function jaErr(fallback: string, err: unknown): Error {
   const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "";
   if (msg && isKnownJaMessage(msg)) {
-    return new Error(msg);
+    return new Error(toUiJa(msg));
   }
   return new Error(fallback);
 }
