@@ -351,7 +351,8 @@ fn catalog_archive(
         let name_raw = file.name_raw().to_vec();
         let extra = file.extra_data().unwrap_or_default();
         let gpbf = file.flags().as_u16();
-        let is_dir = file.is_dir() || name_raw.ends_with(b"/");
+        // zip crate は末尾 0x5C をディレクトリにする。CP932 の 表/ソ などを誤判定するので使わない。
+        let is_dir = zip_name_is_dir(&name_raw);
         let encrypted = file.encrypted();
         let is_symlink = file.is_symlink();
         let uncompressed_size = file.size();
@@ -400,7 +401,7 @@ fn catalog_archive(
     let mut entries = Vec::with_capacity(raw_entries.len());
     let mut dests = DestSet::default();
     for raw in raw_entries {
-        let display_name = decode_name(&raw.name_raw, encoding);
+        let display_name: String = decode_name(&raw.name_raw, encoding).nfc().collect();
         if unsafe_entry_reason(&raw.name_raw, &display_name).is_some() {
             return Err(ZipcoreError::PathTraversal {
                 entry: display_name,
@@ -661,6 +662,17 @@ fn next_raw_unit(raw: &[u8], i: usize) -> usize {
     } else {
         1
     }
+}
+
+/// 末尾 `/`、または CP932 の 2 バイト目ではない末尾 `\` だけをディレクトリとみなす。
+fn zip_name_is_dir(raw: &[u8]) -> bool {
+    if raw.ends_with(b"/") {
+        return true;
+    }
+    if raw.last() != Some(&b'\\') {
+        return false;
+    }
+    raw.len() < 2 || next_raw_unit(raw, raw.len() - 2) != 2
 }
 
 fn for_each_raw_component(raw: &[u8], mut visit: impl FnMut(&[u8]) -> bool) -> bool {
@@ -944,6 +956,12 @@ mod tests {
             unsafe_entry_reason(&hyo_nul, "表NUL.txt").is_none(),
             "表NUL.txt must not look like reserved NUL"
         );
+        assert!(!zip_name_is_dir(&hyo));
+        assert!(!zip_name_is_dir(&so));
+        assert!(!zip_name_is_dir(&[0x95, 0x5C]));
+        assert!(zip_name_is_dir(b"dir/"));
+        assert!(zip_name_is_dir(br"dir\"));
+        assert!(zip_name_is_dir(&[0x95, 0x5C, b'\\']));
         assert!(unsafe_entry_reason(b"", "").is_some());
         assert!(unsafe_entry_reason(b".", ".").is_some());
         assert!(unsafe_entry_reason(b"././.", "././.").is_some());

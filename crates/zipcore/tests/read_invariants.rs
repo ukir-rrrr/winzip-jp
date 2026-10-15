@@ -311,6 +311,53 @@ fn extract_accepts_cp932_names_with_0x5c_trail() {
 }
 
 #[test]
+fn extract_cp932_name_ending_in_0x5c_is_a_file() {
+    let tmp = support::TempDir::new();
+    let hyo = encode_entry_name("表").cp932;
+    let yotei = encode_entry_name("予定表").cp932;
+    assert_eq!(*hyo.last().unwrap(), 0x5C);
+    assert_eq!(*yotei.last().unwrap(), 0x5C);
+    let zip = tmp.path().join("hyo.zip");
+    write_stored_zip(&zip, &[(&hyo, b"sheet", 0), (&yotei, b"plan", 0)]);
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(&dest).unwrap();
+    extract_zip(
+        extract_req(zip, dest.clone(), false),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(dest.join("表").is_file());
+    assert_eq!(fs::read(dest.join("表")).unwrap(), b"sheet");
+    assert!(dest.join("予定表").is_file());
+    assert_eq!(fs::read(dest.join("予定表")).unwrap(), b"plan");
+}
+
+#[test]
+fn extract_nfd_utf8_name_writes_nfc() {
+    let tmp = support::TempDir::new();
+    let nfd = "か\u{3099}.txt";
+    let nfc = "が.txt";
+    assert_ne!(nfd, nfc);
+    let zip = tmp.path().join("nfd.zip");
+    write_stored_zip(&zip, &[(nfd.as_bytes(), b"nfd", EFS_UTF8_BIT)]);
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(&dest).unwrap();
+    let listed = list_auto(&zip);
+    assert_eq!(listed.entries[0].display_name, nfc);
+    extract_zip(
+        extract_req(zip, dest.clone(), false),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(fs::read(dest.join(nfc)).unwrap(), b"nfd");
+    if nfd != nfc {
+        assert!(!dest.join(nfd).exists());
+    }
+}
+
+#[test]
 fn extract_missing_archive_is_input_missing_and_does_not_create_dest() {
     let tmp = support::TempDir::new();
     let dest = tmp.path().join("out");

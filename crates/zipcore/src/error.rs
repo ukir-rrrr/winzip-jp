@@ -64,7 +64,7 @@ pub enum ZipcoreError {
 impl fmt::Display for ZipcoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "入出力エラー: {e}"),
+            Self::Io(e) => write!(f, "入出力エラー: {}", io_kind_ja(e.kind())),
             Self::EmptyInputs => write!(f, "追加できるファイルがありません"),
             Self::Cancelled => write!(f, "キャンセルされました"),
             Self::AesNotImplemented => {
@@ -133,6 +133,22 @@ impl From<io::Error> for ZipcoreError {
     }
 }
 
+fn io_kind_ja(kind: io::ErrorKind) -> &'static str {
+    use io::ErrorKind::*;
+    match kind {
+        NotFound => "見つかりません",
+        PermissionDenied => "権限がありません",
+        AlreadyExists => "既にあります",
+        InvalidInput | InvalidData => "データが不正です",
+        UnexpectedEof => "ファイルが途中で終わりました",
+        WriteZero => "書き込めませんでした",
+        Interrupted => "中断されました",
+        Unsupported => "この操作は扱えません",
+        OutOfMemory => "メモリが足りません",
+        _ => "読み書きに失敗しました",
+    }
+}
+
 impl From<zip::result::ZipError> for ZipcoreError {
     fn from(value: zip::result::ZipError) -> Self {
         match value {
@@ -187,5 +203,11 @@ mod tests {
             other.to_string(),
             "ZIP が壊れています: エントリが見つかりません"
         );
+
+        let io = ZipcoreError::from(io::Error::new(io::ErrorKind::NotFound, "No such file"));
+        let text = io.to_string();
+        assert!(text.contains("見つかりません"), "{text}");
+        assert!(!text.contains("No such"), "{text}");
+        assert!(!text.contains("os error"), "{text}");
     }
 }

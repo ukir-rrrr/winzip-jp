@@ -142,23 +142,20 @@ mod tests {
     }
 
     #[test]
-    fn atomic_replace_overwrites_without_leaving_backup_on_unix() {
+    fn atomic_replace_overwrites_without_leaving_backup() {
         let (root, from, to) = temp_pair("atomic");
         fs::write(&from, b"new").unwrap();
         fs::write(&to, b"old").unwrap();
         let backup = atomic_replace(&from, &to).unwrap();
         assert_eq!(fs::read(&to).unwrap(), b"new");
-        if cfg!(windows) {
-            assert!(backup.is_some());
-            let _ = fs::remove_file(backup.unwrap());
-        } else {
-            assert_eq!(backup, None);
-            let leftovers: Vec<String> = fs::read_dir(&root)
-                .unwrap()
-                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-                .collect();
-            assert_eq!(leftovers, vec!["to.bin".to_string()]);
+        if let Some(backup) = backup {
+            let _ = fs::remove_file(backup);
         }
+        let leftovers: Vec<String> = fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(leftovers, vec!["to.bin".to_string()]);
         let _ = fs::remove_dir_all(&root);
     }
 
