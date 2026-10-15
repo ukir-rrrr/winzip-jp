@@ -23,7 +23,7 @@ use crate::pkzip::{
     inspect_reader, inspect_zip, patch_local_sizes, write_central_header, write_eocd,
     write_local_header, CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED, VERSION_NEEDED,
 };
-use crate::split::{self, SplitSink, SplitWriter};
+use crate::split::{self, is_split_sibling, SplitSink, SplitWriter};
 
 pub use crate::job::{Progress, ProgressPhase, SecretString};
 pub use crate::pkzip::InspectedEntry;
@@ -740,7 +740,9 @@ fn dest_overlaps_input(dest: &Path, inputs: &[InputItem], plan: &Plan) -> bool {
     let dest = resolve_path(dest);
     inputs.iter().any(|item| {
         let input = resolve_existing(&item.abs_path);
-        path_eq(&dest, &input) || (item.as_dir && stays_under(&dest, &input))
+        path_eq(&dest, &input)
+            || is_split_sibling(&dest, &input)
+            || (item.as_dir && stays_under(&dest, &input))
     }) || plan
         .entries
         .iter()

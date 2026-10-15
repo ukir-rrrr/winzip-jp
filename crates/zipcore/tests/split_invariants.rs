@@ -290,6 +290,29 @@ fn leftover_split_pieces_do_not_spoil_later_single_zip() {
 }
 
 #[test]
+fn dest_split_sibling_input_is_rejected_even_if_case_differs() {
+    let tmp = support::TempDir::new();
+    let z01 = tmp.path().join("out.z01");
+    write_file(&z01, b"old piece");
+    let dest = tmp.path().join("OUT.zip");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: z01.clone(),
+            as_dir: false,
+        }],
+        dest: dest.clone(),
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: None,
+        replacements: BTreeMap::new(),
+    };
+    let err = write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_err();
+    assert!(matches!(err, ZipcoreError::DestOverlapsInput { .. }));
+    assert_eq!(fs::read(&z01).unwrap(), b"old piece");
+    assert!(!dest.exists());
+}
+
+#[test]
 fn split_cancel_deletes_every_piece() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("src");
