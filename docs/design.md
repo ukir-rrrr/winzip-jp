@@ -460,6 +460,7 @@ pick_save_zip → startAccessing(dest ファイル)
 fsync → dest へ rename
   別ボリューム（EXDEV）だけ copy + remove。既存 dest はコンテナへ退避してから置き、失敗したら戻す。
   dest を fsync してから退避を消す。戻しに失敗したら退避は消さない。
+  新規 dest で fsync に失敗したら dest を消してエラー。
   エラーは種別の日本語と退避パス。OS の生文言は出さない。親フォルダに sidecar は作らない。
 失敗・キャンセル → tmp 削除
 stopAccessing(all)
