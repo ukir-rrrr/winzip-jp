@@ -216,6 +216,30 @@ fn python_bin() -> Option<&'static str> {
 }
 
 #[test]
+fn windows_extract_ps1_is_utf8_bom_ascii() {
+    let bytes = fs::read(workspace_root().join("tests/oracles/windows-extract.ps1"))
+        .expect("windows-extract.ps1");
+    assert!(
+        bytes.starts_with(&[0xEF, 0xBB, 0xBF]),
+        "UTF-8 BOM is required so Windows PowerShell 5.1 does not parse this as CP1252"
+    );
+    let body = &bytes[3..];
+    assert!(
+        body.is_ascii(),
+        "ps1 source must stay ASCII; non-ASCII in 5.1 without a BOM eats string terminators"
+    );
+    let text = std::str::from_utf8(body).unwrap();
+    assert!(
+        text.contains(r"'C:\Program Files\7-Zip\7z.exe'"),
+        "7-Zip path must be a single-quoted literal"
+    );
+    assert!(
+        text.contains(r#"& "$Seven""#),
+        "7-Zip invocation must quote the executable path"
+    );
+}
+
+#[test]
 fn golden_headers_match_expected_json() {
     for case in load_cases() {
         let tmp = materialize(&case);
@@ -275,7 +299,7 @@ fn windows_oracle_7zip_and_optional_reports() {
         write_case(&case, &payload, &zip);
         let work = tmp.path().join("oracle-work");
         fs::create_dir_all(&work).unwrap();
-        let status = Command::new("powershell")
+        let out = Command::new("powershell")
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(&ps1)
             .arg("-ZipPath")
@@ -284,12 +308,14 @@ fn windows_oracle_7zip_and_optional_reports() {
             .arg(case.dir.join("expected.json"))
             .arg("-WorkDir")
             .arg(&work)
-            .status()
+            .output()
             .expect("powershell");
         assert!(
-            status.success(),
-            "{} windows-extract.ps1 failed",
-            case.dir.file_name().unwrap().to_string_lossy()
+            out.status.success(),
+            "{} windows-extract.ps1 failed\nstdout:\n{}\nstderr:\n{}",
+            case.dir.file_name().unwrap().to_string_lossy(),
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
         );
     }
 }
