@@ -126,17 +126,17 @@ impl Sandbox {
             existing.recursive |= recursive;
             return;
         }
-        let is_dir = stored.is_dir() || original.is_dir();
         // startAccessing はダイアログ/ドロップの元パス。比較キーは canonicalize 後。
         #[cfg(target_os = "macos")]
-        let access = scoped::ScopedUrl::start(&original, is_dir);
+        let access = scoped::ScopedUrl::start(&original, stored.is_dir() || original.is_dir());
+        #[cfg(not(target_os = "macos"))]
+        let _ = original;
         self.grants.push(Grant {
             path: stored,
             recursive,
             #[cfg(target_os = "macos")]
             _access: access,
         });
-        let _ = (original, is_dir);
     }
 
     fn hold_kernel(&mut self, path: &Path, is_dir: bool) {
@@ -216,7 +216,10 @@ pub fn container_tmp_zip() -> PathBuf {
 pub fn is_container_tmp(path: &Path) -> bool {
     let tmp = resolve_path(&std::env::temp_dir());
     let abs = resolve_path(path);
-    if !stays_under(&abs, &tmp) {
+    let Some(parent) = abs.parent() else {
+        return false;
+    };
+    if !path_eq(parent, &tmp) {
         return false;
     }
     let name = abs.file_name().and_then(|n| n.to_str()).unwrap_or_default();
@@ -265,6 +268,10 @@ mod tests {
         let tmp = container_tmp_zip();
         assert!(is_container_tmp(&tmp));
         assert!(!Sandbox::new().allows(&tmp));
+        let nested = std::env::temp_dir()
+            .join("other")
+            .join(format!("{TMP_PREFIX}nested.zip"));
+        assert!(!is_container_tmp(&nested));
     }
 
     #[test]

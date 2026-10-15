@@ -8,6 +8,7 @@
 	<true/>
 	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
+	<!-- 設計 §4.1 の placeholder。提出用の実値はプロビジョニング側。 -->
 	<key>com.apple.application-identifier</key>
 	<string>$TEAM_ID.jp.riku.winzip</string>
 	<key>com.apple.developer.team-identifier</key>

@@ -233,7 +233,7 @@ fn ungranted_path_is_rejected() {
 }
 
 #[test]
-fn cancel_deletes_container_tmp() {
+fn cancel_does_not_leave_dest() {
     let root = unique_dir("cancel");
     let src_dir = root.join("many");
     fs::create_dir_all(&src_dir).unwrap();
