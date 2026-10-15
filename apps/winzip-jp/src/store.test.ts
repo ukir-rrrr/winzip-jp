@@ -81,6 +81,36 @@ describe("replacements 契約", () => {
     assert.equal(useAppStore.getState().job, null);
   });
 
+  it("確定の連打では作成を 1 回だけ始める", async () => {
+    let finishCheck!: (ok: boolean) => void;
+    let createCalls = 0;
+    let pickCalls = 0;
+    installApi({
+      async planArchive() {
+        return S3_PLAN;
+      },
+      checkNames: () =>
+        new Promise((resolve) => {
+          finishCheck = resolve;
+        }),
+      async pickSaveZip() {
+        pickCalls += 1;
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive() {
+        createCalls += 1;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    const first = useAppStore.getState().confirmAndCreate();
+    const second = useAppStore.getState().confirmAndCreate();
+    finishCheck(true);
+    await Promise.all([first, second]);
+    assert.equal(pickCalls, 1);
+    assert.equal(createCalls, 1);
+  });
+
   it("絵文字の置換では作成しない", async () => {
     installApi({
       async planArchive() {

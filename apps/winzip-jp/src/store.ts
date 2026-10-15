@@ -38,6 +38,7 @@ export type AppState = {
   archivePath: string | null;
   encodingOverride: NameEncoding | null;
   job: Job | null;
+  confirming: boolean;
   epoch: number;
   error: string;
   setMode: (mode: Mode) => void;
@@ -122,11 +123,16 @@ const emptyWork = {
   archivePath: null as string | null,
   encodingOverride: null as NameEncoding | null,
   job: null as Job | null,
+  confirming: false,
   error: "",
 };
 
 export const useAppStore = create<AppState>((set, get) => {
   const live = (epoch: number) => get().epoch === epoch;
+
+  function isBlocked(): boolean {
+    return jobInFlight(get().job) || get().confirming;
+  }
 
   function begin(patch: Partial<AppState>): number {
     const epoch = get().epoch + 1;
@@ -197,7 +203,7 @@ export const useAppStore = create<AppState>((set, get) => {
     ...emptyWork,
 
     setMode(mode) {
-      if (jobInFlight(get().job)) {
+      if (isBlocked()) {
         return;
       }
       begin({ mode, ...emptyWork });
@@ -212,14 +218,14 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     resetWork() {
-      if (jobInFlight(get().job)) {
+      if (isBlocked()) {
         return;
       }
       begin({ ...emptyWork });
     },
 
     async ingestDropped(paths) {
-      if (jobInFlight(get().job)) {
+      if (isBlocked()) {
         return;
       }
       const usable = paths.filter(Boolean);
@@ -312,32 +318,37 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async confirmAndCreate() {
-      if (!get().plan || jobInFlight(get().job)) {
+      if (!get().plan || isBlocked()) {
         return;
       }
-      const issues = get().plan?.issues ?? [];
-      if (!replacementsOk(get().replacements, issues)) {
-        set({ error: COPY.invalidReplacement, sheet: "open" });
-        return;
-      }
-      const names = [...new Set(issues.map((issue) => issue.relativePath))].map((path) =>
-        normalizeReplacement(get().replacements[path] ?? ""),
-      );
+      set({ confirming: true });
       try {
-        if (names.length > 0 && !(await getApi().checkNames(names))) {
+        const issues = get().plan?.issues ?? [];
+        if (!replacementsOk(get().replacements, issues)) {
           set({ error: COPY.invalidReplacement, sheet: "open" });
           return;
         }
-      } catch (err) {
-        set({ error: errText(err), sheet: "open" });
-        return;
+        const names = [...new Set(issues.map((issue) => issue.relativePath))].map((path) =>
+          normalizeReplacement(get().replacements[path] ?? ""),
+        );
+        try {
+          if (names.length > 0 && !(await getApi().checkNames(names))) {
+            set({ error: COPY.invalidReplacement, sheet: "open" });
+            return;
+          }
+        } catch (err) {
+          set({ error: errText(err), sheet: "open" });
+          return;
+        }
+        set({ sheet: "none" });
+        await startCreate();
+      } finally {
+        set({ confirming: false });
       }
-      set({ sheet: "none" });
-      await startCreate();
     },
 
     async createZip() {
-      if (jobInFlight(get().job)) {
+      if (isBlocked()) {
         return;
       }
       const { dropped, plan } = get();
@@ -353,7 +364,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setEncoding(encoding) {
-      if (jobInFlight(get().job)) {
+      if (isBlocked()) {
         return;
       }
       const archive = get().archivePath;
@@ -378,7 +389,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async extractZip() {
-      if (jobInFlight(get().job)) {
+      if (isBlocked()) {
         return;
       }
       const archive = get().archivePath ?? firstZip(get().dropped);
@@ -402,7 +413,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async cancel() {
-      begin({ job: null, error: COPY.cancelled });
+      begin({ job: null, confirming: false, error: COPY.cancelled });
       await getApi().cancelJob();
     },
 
