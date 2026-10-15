@@ -56,13 +56,18 @@ export function isKnownJaMessage(msg: string): boolean {
   return KNOWN_JA_PREFIXES.some((prefix) => msg === prefix || msg.startsWith(prefix));
 }
 
-/** zipcore の Corrupt 文言だけ。パスに EOCD が含まれる場合は触らない。 */
+const CORRUPT_PREFIX = "ZIP が壊れています:";
+
+/** zipcore の Corrupt 文言だけ。ほかの既知エラーのパス部分は触らない。 */
 const JA_ACRONYM_REWRITES: ReadonlyArray<readonly [string, string]> = [
   ["EOCD 署名がありません", "中央ディレクトリ終端の署名がありません"],
   ["EOCD が見つかりません", "中央ディレクトリ終端が見つかりません"],
 ];
 
 export function toUiJa(msg: string): string {
+  if (!msg.startsWith(CORRUPT_PREFIX)) {
+    return msg;
+  }
   let out = msg;
   for (const [from, to] of JA_ACRONYM_REWRITES) {
     out = out.split(from).join(to);

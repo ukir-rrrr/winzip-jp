@@ -33,5 +33,9 @@ describe("jaErr", () => {
       jaErr(COPY.failed, new Error("入力が見つかりません: /tmp/EOCD.png")).message,
       "入力が見つかりません: /tmp/EOCD.png",
     );
+    assert.equal(
+      jaErr(COPY.failed, new Error("入力が見つかりません: /tmp/EOCD 署名がありません.png")).message,
+      "入力が見つかりません: /tmp/EOCD 署名がありません.png",
+    );
   });
 });
