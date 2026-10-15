@@ -21,8 +21,20 @@ export function defaultReplacements(issues: Unmappable[]): Record<string, string
   return next;
 }
 
+export function normalizeReplacement(value: string): string {
+  return value.trim();
+}
+
+export function normalizeReplacements(map: Record<string, string>): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(map)) {
+    next[key] = normalizeReplacement(value);
+  }
+  return next;
+}
+
 export function isValidReplacement(value: string): boolean {
-  const trimmed = value.trim();
+  const trimmed = normalizeReplacement(value);
   if (!trimmed || trimmed.includes("\\") || trimmed.includes("\0")) {
     return false;
   }

@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   defaultReplacements,
   isValidReplacement,
+  normalizeReplacement,
+  normalizeReplacements,
   replacementFieldId,
   replacementRows,
   suggestedPath,
@@ -72,6 +74,13 @@ describe("isValidReplacement", () => {
     assert.equal(isValidReplacement("dir/高.png"), true);
     assert.equal(isValidReplacement("高/"), true);
     assert.equal(isValidReplacement("dir/高/"), true);
+  });
+
+  it("trims trailing spaces before send (Windows drops them)", () => {
+    assert.equal(normalizeReplacement("高.png "), "高.png");
+    assert.equal(normalizeReplacement(" 高.png"), "高.png");
+    assert.equal(isValidReplacement("高.png "), true);
+    assert.deepEqual(normalizeReplacements({ "髙.png": "高.png " }), { "髙.png": "高.png" });
   });
 });
 

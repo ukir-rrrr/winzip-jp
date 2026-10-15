@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { getApi } from "./api";
 import { COPY } from "./copy";
-import { defaultReplacements, isValidReplacement } from "./replacements";
+import { defaultReplacements, isValidReplacement, normalizeReplacements } from "./replacements";
 import type {
   ExtractReport,
   ListReport,
@@ -168,7 +168,8 @@ export const useAppStore = create<AppState>((set, get) => {
     return runJob(
       "create",
       () => getApi().pickSaveZip(destHint(plan, "archive.zip")),
-      (dest) => getApi().createArchive({ paths: dropped, replacements }, dest),
+      (dest) =>
+        getApi().createArchive({ paths: dropped, replacements: normalizeReplacements(replacements) }, dest),
       COPY.noDest,
     );
   }

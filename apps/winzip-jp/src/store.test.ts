@@ -24,6 +24,26 @@ describe("replacements 契約", () => {
     assert.equal(useAppStore.getState().sheet, "open");
   });
 
+  it("末尾空白の置換は trim して送る", async () => {
+    let sent: Record<string, string> | undefined;
+    installApi({
+      async planArchive() {
+        return S3_PLAN;
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        sent = req.replacements;
+        return { dest: req.paths[0] ?? "", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().updateReplacement("髙.png", "高.png ");
+    await useAppStore.getState().confirmAndCreate();
+    assert.equal(sent?.["髙.png"], "高.png");
+  });
+
   it("空の置換では作成しない", async () => {
     installApi({
       async planArchive() {
