@@ -17,7 +17,7 @@ use crate::dto::{
     path_buf, starting_progress, CreateDto, ExtractDto, ExtractReportDto, ListReportDto, PlanDto,
     ProgressDto, WriteReportDto,
 };
-use crate::sandbox::{container_tmp_zip, discard_tmp, publish_tmp, Sandbox};
+use crate::sandbox::{container_tmp_zip, discard_tmp, publish_tmp, PublishError, Sandbox};
 
 pub const PROGRESS_EVENT: &str = "zip://progress";
 pub const DROPPED_EVENT: &str = "zip://dropped";
@@ -62,17 +62,23 @@ fn lock_sandbox(
         .map_err(|_| "内部状態をロックできません".to_string())
 }
 
-fn io_ja(err: std::io::Error) -> String {
-    let raw = err.to_string();
-    let kind = match err.kind() {
+fn io_ja(err: &std::io::Error) -> String {
+    match err.kind() {
         std::io::ErrorKind::NotFound => "見つかりません",
         std::io::ErrorKind::PermissionDenied => "権限がありません",
         _ => "読み書きに失敗しました",
-    };
-    if raw.starts_with(crate::sandbox::RESTORE_BACKUP_HINT) {
-        format!("{kind}（{raw}）")
-    } else {
-        kind.into()
+    }
+    .into()
+}
+
+fn publish_err_ja(err: PublishError) -> String {
+    match err {
+        PublishError::Io(e) => format!("保存先へ移せませんでした: {}", io_ja(&e)),
+        PublishError::BackupKept { source, backup } => format!(
+            "保存先へ移せませんでした: {}（元の保存先の退避: {}）",
+            io_ja(&source),
+            backup.display()
+        ),
     }
 }
 
@@ -153,7 +159,7 @@ pub fn create_archive_direct(
     {
         return Err("EFS（bit 11）が立っています".into());
     }
-    publish_tmp(&tmp.0, &dest).map_err(|e| format!("保存先へ移せませんでした: {}", io_ja(e)))?;
+    publish_tmp(&tmp.0, &dest).map_err(publish_err_ja)?;
     Ok(WriteReportDto::from(report).with_dest(&dest))
 }
 
@@ -445,13 +451,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn io_ja_keeps_restore_backup_path() {
-        let path = "/tmp/winzip-jp-keep.zip";
+    fn io_ja_is_kind_only() {
         let err = std::io::Error::new(
             std::io::ErrorKind::StorageFull,
-            format!("{}{path}", crate::sandbox::RESTORE_BACKUP_HINT),
+            "元の保存先の退避: /tmp/x.zip",
         );
-        let text = io_ja(err);
+        assert_eq!(io_ja(&err), "読み書きに失敗しました");
+    }
+
+    #[test]
+    fn publish_err_ja_includes_backup_path() {
+        let path = "/tmp/winzip-jp-keep.zip";
+        let err = PublishError::BackupKept {
+            source: std::io::Error::new(std::io::ErrorKind::StorageFull, "ignored"),
+            backup: PathBuf::from(path),
+        };
+        let text = publish_err_ja(err);
         assert!(text.contains("読み書きに失敗しました"));
         assert!(text.contains(path));
     }

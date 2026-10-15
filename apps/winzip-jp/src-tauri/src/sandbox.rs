@@ -11,7 +11,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use zipcore::{absolute, normalize_lexically, path_eq, resolve_path, stays_under};
 
 const TMP_PREFIX: &str = "winzip-jp-";
-pub(crate) const RESTORE_BACKUP_HINT: &str = "元の保存先の退避: ";
+
+#[derive(Debug)]
+pub enum PublishError {
+    Io(io::Error),
+    BackupKept { source: io::Error, backup: PathBuf },
+}
+
+impl From<io::Error> for PublishError {
+    fn from(err: io::Error) -> Self {
+        Self::Io(err)
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod scoped {
@@ -244,57 +255,59 @@ pub fn is_container_tmp(path: &Path) -> bool {
 }
 
 /// コンテナ tmp を fsync してからユーザー先へ rename（別ボリュームは copy+remove）。
-pub fn publish_tmp(tmp: &Path, dest: &Path) -> io::Result<()> {
+pub fn publish_tmp(tmp: &Path, dest: &Path) -> Result<(), PublishError> {
     if !is_container_tmp(tmp) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "コンテナ一時ファイルではありません",
-        ));
+        )
+        .into());
     }
     if tmp.exists() {
-        let file = File::open(tmp)?;
-        file.sync_all()?;
-        drop(file);
+        File::open(tmp)?.sync_all()?;
     }
     match fs::rename(tmp, dest) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => publish_across_volumes(tmp, dest),
         Err(e) => {
             discard_tmp(tmp);
-            Err(e)
+            Err(e.into())
         }
     }
 }
 
 /// 別ボリュームでは dest を直接 copy する。失敗時は既存 dest をコンテナ退避から戻す。
 /// 戻しに失敗したら退避は消さない。
-fn publish_across_volumes(tmp: &Path, dest: &Path) -> io::Result<()> {
-    let backup = dest.exists().then(container_tmp_zip);
-    publish_across_volumes_inner(tmp, dest, backup)
+fn publish_across_volumes(tmp: &Path, dest: &Path) -> Result<(), PublishError> {
+    publish_across_volumes_with(tmp, dest, |src, dst| fs::copy(src, dst).map(|_| ()))
 }
 
-fn publish_across_volumes_inner(
+fn publish_across_volumes_with(
     tmp: &Path,
     dest: &Path,
-    backup: Option<PathBuf>,
-) -> io::Result<()> {
-    if let Some(bak) = &backup {
-        if let Err(e) = fs::copy(dest, bak) {
+    place: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> Result<(), PublishError> {
+    let backup = if dest.exists() {
+        let bak = container_tmp_zip();
+        if let Err(e) = fs::copy(dest, &bak) {
             discard_tmp(tmp);
-            return Err(e);
+            return Err(e.into());
         }
-    }
-    match copy_tmp_to_dest(tmp, dest) {
-        Ok(_) => {
+        Some(bak)
+    } else {
+        None
+    };
+    match place(tmp, dest) {
+        Ok(()) => {
             if let Err(e) = sync_file(dest) {
                 discard_tmp(tmp);
-                if let Some(bak) = backup {
-                    return Err(io::Error::new(
-                        e.kind(),
-                        format!("{RESTORE_BACKUP_HINT}{}", bak.display()),
-                    ));
-                }
-                return Err(e);
+                return Err(match backup {
+                    Some(bak) => PublishError::BackupKept {
+                        source: e,
+                        backup: bak,
+                    },
+                    None => e.into(),
+                });
             }
             discard_tmp(tmp);
             if let Some(bak) = backup {
@@ -304,34 +317,23 @@ fn publish_across_volumes_inner(
         }
         Err(e) => {
             if let Some(bak) = backup {
-                if !restore_or_keep_backup(&bak, dest) {
+                if restore_or_keep_backup(&bak, dest) {
                     discard_tmp(tmp);
-                    return Err(io::Error::new(
-                        e.kind(),
-                        format!("{RESTORE_BACKUP_HINT}{}", bak.display()),
-                    ));
+                    Err(PublishError::Io(e))
+                } else {
+                    discard_tmp(tmp);
+                    Err(PublishError::BackupKept {
+                        source: e,
+                        backup: bak,
+                    })
                 }
             } else {
                 let _ = fs::remove_file(dest);
+                discard_tmp(tmp);
+                Err(e.into())
             }
-            discard_tmp(tmp);
-            Err(e)
         }
     }
-}
-
-fn copy_tmp_to_dest(tmp: &Path, dest: &Path) -> io::Result<u64> {
-    #[cfg(test)]
-    if FAIL_AFTER_TRUNCATE.with(|c| c.replace(false)) {
-        let _ = File::create(dest);
-        let _ = fs::remove_file(dest);
-        let _ = fs::create_dir(dest);
-        return Err(io::Error::new(
-            io::ErrorKind::StorageFull,
-            "copy failed after truncate",
-        ));
-    }
-    fs::copy(tmp, dest)
 }
 
 fn sync_file(path: &Path) -> io::Result<()> {
@@ -339,17 +341,14 @@ fn sync_file(path: &Path) -> io::Result<()> {
 }
 
 fn restore_or_keep_backup(bak: &Path, dest: &Path) -> bool {
-    if fs::copy(bak, dest).is_ok() {
-        let _ = fs::remove_file(bak);
-        true
-    } else {
-        false
+    if fs::copy(bak, dest).is_err() {
+        return false;
     }
-}
-
-#[cfg(test)]
-thread_local! {
-    static FAIL_AFTER_TRUNCATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    if sync_file(dest).is_err() {
+        return false;
+    }
+    let _ = fs::remove_file(bak);
+    true
 }
 
 pub fn discard_tmp(tmp: &Path) {
@@ -563,16 +562,22 @@ mod tests {
         fs::write(&dest, b"old").unwrap();
         let tmp = container_tmp_zip();
         fs::write(&tmp, b"new").unwrap();
-        let bak = container_tmp_zip();
-        FAIL_AFTER_TRUNCATE.with(|c| c.set(true));
-        let err = publish_across_volumes_inner(&tmp, &dest, Some(bak.clone()));
-        FAIL_AFTER_TRUNCATE.with(|c| c.set(false));
-        let err = err.unwrap_err();
-        assert!(err.to_string().contains(&bak.display().to_string()));
+        let err = publish_across_volumes_with(&tmp, &dest, |_, dest| {
+            let _ = File::create(dest);
+            let _ = fs::remove_file(dest);
+            let _ = fs::create_dir(dest);
+            Err(io::Error::new(
+                io::ErrorKind::StorageFull,
+                "copy failed after truncate",
+            ))
+        });
+        let PublishError::BackupKept { backup, .. } = err.unwrap_err() else {
+            panic!("expected BackupKept");
+        };
         assert!(!tmp.exists());
-        assert!(bak.exists());
-        assert_eq!(fs::read(&bak).unwrap(), b"old");
-        let _ = fs::remove_file(&bak);
+        assert!(backup.exists());
+        assert_eq!(fs::read(&backup).unwrap(), b"old");
+        let _ = fs::remove_file(&backup);
         let _ = fs::remove_dir_all(&dest_root);
     }
 
