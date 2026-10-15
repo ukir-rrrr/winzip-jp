@@ -18,10 +18,9 @@ export type Job = {
   kind: JobKind;
   progress: ProgressDto;
   dest: string | null;
-  epoch: number;
 };
 
-export type Sheet = "none" | "open" | "dismissed" | "confirmed";
+export type Sheet = "none" | "open" | "dismissed";
 
 export type AppState = {
   mode: Mode;
@@ -100,6 +99,10 @@ function jobInFlight(job: Job | null): boolean {
   return job !== null && job.progress.phase !== "done";
 }
 
+function replacementsOk(replacements: Record<string, string>): boolean {
+  return Object.values(replacements).every(isValidReplacement);
+}
+
 const emptyWork = {
   dropped: [] as string[],
   plan: null as PlanDto | null,
@@ -113,9 +116,11 @@ const emptyWork = {
 };
 
 export const useAppStore = create<AppState>((set, get) => {
-  function bumpEpoch(): number {
+  const live = (epoch: number) => get().epoch === epoch;
+
+  function begin(patch: Partial<AppState>): number {
     const epoch = get().epoch + 1;
-    set({ epoch });
+    set({ ...patch, epoch });
     return epoch;
   }
 
@@ -125,14 +130,13 @@ export const useAppStore = create<AppState>((set, get) => {
     run: (dest: string) => Promise<WriteReport | ExtractReport>,
     noDest: string,
   ): Promise<void> {
-    const epoch = bumpEpoch();
-    set({
+    const epoch = begin({
       error: "",
-      job: { kind, progress: startingProgress(), dest: null, epoch },
+      job: { kind, progress: startingProgress(), dest: null },
     });
     try {
       const dest = await pickDest();
-      if (get().epoch !== epoch) {
+      if (!live(epoch)) {
         return;
       }
       if (!dest) {
@@ -140,7 +144,7 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
       const report = await run(dest);
-      if (get().epoch !== epoch) {
+      if (!live(epoch)) {
         return;
       }
       set({
@@ -148,15 +152,25 @@ export const useAppStore = create<AppState>((set, get) => {
           kind,
           dest: report.dest,
           progress: doneProgress(report.entriesWritten, report.bytesWritten),
-          epoch,
         },
       });
     } catch (err) {
-      if (get().epoch !== epoch) {
+      if (!live(epoch)) {
         return;
       }
-      set({ error: errText(err), job: null });
+      const reopen = kind === "create" && (get().plan?.issues.length ?? 0) > 0;
+      set({ error: errText(err), job: null, sheet: reopen ? "open" : get().sheet });
     }
+  }
+
+  function startCreate(): Promise<void> {
+    const { dropped, plan, replacements } = get();
+    return runJob(
+      "create",
+      () => getApi().pickSaveZip(destHint(plan, "archive.zip")),
+      (dest) => getApi().createArchive({ paths: dropped, replacements }, dest),
+      COPY.noDest,
+    );
   }
 
   return {
@@ -168,19 +182,19 @@ export const useAppStore = create<AppState>((set, get) => {
       if (jobInFlight(get().job)) {
         return;
       }
-      set({ mode, ...emptyWork, epoch: get().epoch + 1 });
+      begin({ mode, ...emptyWork });
     },
 
     setProgress(progress) {
       const job = get().job;
-      if (!job || job.epoch !== get().epoch) {
+      if (!job) {
         return;
       }
       set({ job: { ...job, progress } });
     },
 
     resetWork() {
-      set({ ...emptyWork, epoch: get().epoch + 1 });
+      begin({ ...emptyWork });
     },
 
     async ingestDropped(paths) {
@@ -192,13 +206,12 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ error: get().mode === "create" ? COPY.noFiles : COPY.noZip });
         return;
       }
-      const epoch = bumpEpoch();
-      set({ dropped: usable, error: "", job: null });
+      const epoch = begin({ dropped: usable, error: "", job: null });
       const api = getApi();
       if (get().mode === "create") {
         try {
           const plan = await api.planArchive(usable);
-          if (get().epoch !== epoch) {
+          if (!live(epoch)) {
             return;
           }
           const issues = plan.issues ?? [];
@@ -210,7 +223,7 @@ export const useAppStore = create<AppState>((set, get) => {
             archivePath: null,
           });
         } catch (err) {
-          if (get().epoch !== epoch) {
+          if (!live(epoch)) {
             return;
           }
           set({ plan: null, sheet: "none", error: errText(err) });
@@ -224,12 +237,12 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       try {
         const list = await api.listArchive(archive, get().encodingOverride);
-        if (get().epoch !== epoch) {
+        if (!live(epoch)) {
           return;
         }
         set({ list, plan: null, sheet: "none", archivePath: archive });
       } catch (err) {
-        if (get().epoch !== epoch) {
+        if (!live(epoch)) {
           return;
         }
         set({ list: null, error: errText(err) });
@@ -262,45 +275,35 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async confirmAndCreate() {
-      if (!get().plan) {
+      if (!get().plan || jobInFlight(get().job)) {
         return;
       }
-      const values = Object.values(get().replacements);
-      if (values.some((value) => !isValidReplacement(value))) {
+      if (!replacementsOk(get().replacements)) {
         set({ error: COPY.invalidReplacement, sheet: "open" });
         return;
       }
-      set({ sheet: "confirmed" });
-      await get().createZip();
+      set({ sheet: "none" });
+      await startCreate();
     },
 
     async createZip() {
       if (jobInFlight(get().job)) {
         return;
       }
-      const { dropped, plan, replacements, sheet } = get();
+      const { dropped, plan } = get();
       if (dropped.length === 0) {
         set({ error: COPY.noFiles });
         return;
       }
-      if (plan && plan.issues.length > 0 && sheet !== "confirmed") {
+      if (plan && plan.issues.length > 0) {
         set({ sheet: "open", error: COPY.needConfirm });
         return;
       }
-      const values = Object.values(replacements);
-      if (values.some((value) => !isValidReplacement(value))) {
-        set({ error: COPY.invalidReplacement, sheet: "open" });
-        return;
-      }
-      await runJob(
-        "create",
-        () => getApi().pickSaveZip(destHint(plan, "archive.zip")),
-        (dest) => getApi().createArchive({ paths: dropped, replacements }, dest),
-        COPY.noDest,
-      );
+      await startCreate();
     },
 
     async setEncoding(encoding) {
+      const epoch = get().epoch;
       const archive = get().archivePath;
       if (!archive) {
         set({ encodingOverride: encoding });
@@ -308,8 +311,15 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       set({ encodingOverride: encoding, error: "" });
       try {
-        set({ list: await getApi().listArchive(archive, encoding) });
+        const list = await getApi().listArchive(archive, encoding);
+        if (!live(epoch) || get().archivePath !== archive) {
+          return;
+        }
+        set({ list });
       } catch (err) {
+        if (!live(epoch) || get().archivePath !== archive) {
+          return;
+        }
         set({ error: errText(err) });
       }
     },
@@ -339,8 +349,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async cancel() {
-      bumpEpoch();
-      set({ job: null, error: COPY.cancelled });
+      begin({ job: null, error: COPY.cancelled });
       await getApi().cancelJob();
     },
 

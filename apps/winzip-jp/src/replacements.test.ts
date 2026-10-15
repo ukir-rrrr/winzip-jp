@@ -4,6 +4,7 @@ import {
   defaultReplacements,
   isValidReplacement,
   replacementFieldId,
+  replacementRows,
   suggestedPath,
 } from "./replacements";
 import type { Unmappable } from "./types";
@@ -61,7 +62,6 @@ describe("isValidReplacement", () => {
     assert.equal(isValidReplacement("   "), false);
     assert.equal(isValidReplacement("/"), false);
     assert.equal(isValidReplacement("/abs"), false);
-    assert.equal(isValidReplacement("tail/"), false);
     assert.equal(isValidReplacement(".."), false);
     assert.equal(isValidReplacement("a/../b"), false);
     assert.equal(isValidReplacement("a\\b"), false);
@@ -70,6 +70,20 @@ describe("isValidReplacement", () => {
   it("accepts a relative full name", () => {
     assert.equal(isValidReplacement("高.png"), true);
     assert.equal(isValidReplacement("dir/高.png"), true);
+    assert.equal(isValidReplacement("高/"), true);
+    assert.equal(isValidReplacement("dir/高/"), true);
+  });
+});
+
+describe("replacementRows", () => {
+  it("keeps one row per path", () => {
+    const doubled: Unmappable = {
+      relativePath: "髙髙.png",
+      originalChar: "髙",
+      suggested: "高",
+      kind: "compatIdeograph",
+    };
+    assert.equal(replacementRows([doubled, doubled]).length, 1);
   });
 });
 

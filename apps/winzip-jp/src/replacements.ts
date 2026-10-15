@@ -26,10 +26,25 @@ export function isValidReplacement(value: string): boolean {
   if (!trimmed || trimmed.includes("\\") || trimmed.includes("\0")) {
     return false;
   }
-  if (trimmed.startsWith("/") || trimmed.endsWith("/")) {
+  // zipcore のディレクトリ名は末尾 `/`。印としてだけ許し、成分検査の前に剥がす。
+  const body = trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+  if (!body || body.startsWith("/")) {
     return false;
   }
-  return trimmed.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+  return body.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+}
+
+export function replacementRows(issues: Unmappable[]): Unmappable[] {
+  const seen = new Set<string>();
+  const rows: Unmappable[] = [];
+  for (const issue of issues) {
+    if (seen.has(issue.relativePath)) {
+      continue;
+    }
+    seen.add(issue.relativePath);
+    rows.push(issue);
+  }
+  return rows;
 }
 
 export function replacementFieldId(relativePath: string): string {

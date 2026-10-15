@@ -111,6 +111,57 @@ describe("世代トークン", () => {
     assert.equal(state.error, COPY.cancelled);
   });
 
+  it("setEncoding の後着は新しい list を上書きしない", async () => {
+    let finishA!: (list: import("./types").ListReport) => void;
+    installApi({
+      async listArchive() {
+        return new Promise((resolve) => {
+          finishA = resolve;
+        });
+      },
+    });
+    useAppStore.setState({
+      mode: "extract",
+      archivePath: "/tmp/e2e/a.zip",
+      list: { entries: [], encoding: "cp932", confidence: 1, ambiguous: false },
+    });
+    const pending = useAppStore.getState().setEncoding("utf8");
+    useAppStore.getState().resetWork();
+    useAppStore.setState({
+      mode: "extract",
+      archivePath: "/tmp/e2e/b.zip",
+      list: { entries: [], encoding: "cp932", confidence: 1, ambiguous: false },
+    });
+    finishA({
+      entries: [{ nameHex: "aa", displayName: "古い", isDir: false, uncompressedSize: 1, gpbf: 0 }],
+      encoding: "utf8",
+      confidence: 0.8,
+      ambiguous: false,
+    });
+    await pending;
+    assert.equal(useAppStore.getState().archivePath, "/tmp/e2e/b.zip");
+    assert.equal(useAppStore.getState().list?.entries.length, 0);
+  });
+
+  it("作成失敗で不能文字シートが戻る", async () => {
+    installApi({
+      async planArchive() {
+        return S3_PLAN;
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive() {
+        throw new Error("置き換えを確定してください");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    await useAppStore.getState().confirmAndCreate();
+    assert.equal(useAppStore.getState().sheet, "open");
+    assert.equal(useAppStore.getState().job, null);
+    assert.match(useAppStore.getState().error, /置き換え/);
+  });
+
   it("ジョブ中のドロップは無視する", async () => {
     installApi({
       async planArchive() {
