@@ -165,7 +165,10 @@ fn extract_writes_under_dest_not_container() {
         &AtomicBool::new(false),
     )
     .unwrap();
-    assert!(dest.join("が.txt").exists() || dest.join("readme.txt").exists());
+    assert!(
+        dest.join("が.txt").exists(),
+        "CP932 の が.txt が展開されていること"
+    );
     assert!(
         !dest.join("cp932-typical.zip").exists(),
         "ZIP を展開先へ二重書きしていないこと"

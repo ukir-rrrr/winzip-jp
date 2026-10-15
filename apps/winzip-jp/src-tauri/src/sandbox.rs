@@ -138,7 +138,7 @@ impl Sandbox {
     }
 
     fn insert(&mut self, original: PathBuf, stored: PathBuf, recursive: bool) {
-        if let Some(existing) = self.grants.iter_mut().find(|g| path_eq(&g.path, &stored)) {
+        if let Some(existing) = self.grants.iter_mut().find(|g| g.path == stored) {
             existing.recursive |= recursive;
             return;
         }
@@ -161,7 +161,7 @@ impl Sandbox {
 
     fn covers(&self, path: &Path) -> bool {
         self.grants.iter().any(|g| {
-            if path_eq(path, &g.path) {
+            if path == g.path {
                 return true;
             }
             g.recursive && stays_under(path, &g.path)
@@ -178,7 +178,7 @@ impl Sandbox {
         if resolved.is_dir() {
             return Err("保存先がフォルダです".into());
         }
-        if self.grants.iter().any(|g| path_eq(&resolved, &g.path)) {
+        if self.grants.iter().any(|g| g.path == resolved) {
             return Ok(resolved);
         }
         Err(format!(
@@ -600,6 +600,8 @@ mod tests {
         sandbox.grant_save_dest(&dest);
         assert!(sandbox.allows(&dest));
         assert!(sandbox.resolve_save_file(&dest).is_ok());
+        let other_case = root.join("OUT.zip");
+        assert!(sandbox.resolve_save_file(&other_case).is_err());
         assert!(!sandbox.allows(&sibling));
         assert!(!sandbox.allows(&root));
         let _ = fs::remove_dir_all(&root);

@@ -157,7 +157,7 @@ pub fn create_archive_direct(
         .iter()
         .any(|e| e.gpbf & EFS_UTF8_BIT != 0)
     {
-        return Err("EFS（bit 11）が立っています".into());
+        return Err("ファイル名の UTF-8 フラグ（EFS）が立っています".into());
     }
     publish_tmp(&tmp.0, &dest).map_err(publish_err_ja)?;
     Ok(WriteReportDto::from(report).with_dest(&dest))
