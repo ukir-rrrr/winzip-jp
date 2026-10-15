@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use zipcore::{absolute, normalize_lexically, path_eq, resolve_path, stays_under};
 
 const TMP_PREFIX: &str = "winzip-jp-";
+pub(crate) const RESTORE_BACKUP_HINT: &str = "元の保存先の退避: ";
 
 #[cfg(target_os = "macos")]
 mod scoped {
@@ -297,7 +298,7 @@ fn publish_across_volumes_inner(
                     discard_tmp(tmp);
                     return Err(io::Error::new(
                         e.kind(),
-                        format!("{}（元の保存先の退避: {}）", e, bak.display()),
+                        format!("{RESTORE_BACKUP_HINT}{}", bak.display()),
                     ));
                 }
             } else {

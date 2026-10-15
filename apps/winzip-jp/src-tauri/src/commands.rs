@@ -63,10 +63,16 @@ fn lock_sandbox(
 }
 
 fn io_ja(err: std::io::Error) -> String {
-    match err.kind() {
-        std::io::ErrorKind::NotFound => "見つかりません".into(),
-        std::io::ErrorKind::PermissionDenied => "権限がありません".into(),
-        _ => "読み書きに失敗しました".into(),
+    let raw = err.to_string();
+    let kind = match err.kind() {
+        std::io::ErrorKind::NotFound => "見つかりません",
+        std::io::ErrorKind::PermissionDenied => "権限がありません",
+        _ => "読み書きに失敗しました",
+    };
+    if raw.starts_with(crate::sandbox::RESTORE_BACKUP_HINT) {
+        format!("{kind}（{raw}）")
+    } else {
+        kind.into()
     }
 }
 
@@ -431,5 +437,22 @@ pub fn grant_dropped(state: &AppState, app: &tauri::AppHandle, paths: &[PathBuf]
             .map(|p| p.to_string_lossy().into_owned())
             .collect(),
         Err(_) => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn io_ja_keeps_restore_backup_path() {
+        let path = "/tmp/winzip-jp-keep.zip";
+        let err = std::io::Error::new(
+            std::io::ErrorKind::StorageFull,
+            format!("{}{path}", crate::sandbox::RESTORE_BACKUP_HINT),
+        );
+        let text = io_ja(err);
+        assert!(text.contains("読み書きに失敗しました"));
+        assert!(text.contains(path));
     }
 }
