@@ -279,13 +279,19 @@ pub fn publish_tmp(tmp: &Path, dest: &Path) -> Result<(), PublishError> {
 /// 別ボリュームでは dest を直接 copy する。失敗時は既存 dest をコンテナ退避から戻す。
 /// 戻しに失敗したら退避は消さない。
 fn publish_across_volumes(tmp: &Path, dest: &Path) -> Result<(), PublishError> {
-    publish_across_volumes_with(tmp, dest, |src, dst| fs::copy(src, dst).map(|_| ()))
+    publish_across_volumes_with(
+        tmp,
+        dest,
+        |src, dst| fs::copy(src, dst).map(|_| ()),
+        sync_file,
+    )
 }
 
 fn publish_across_volumes_with(
     tmp: &Path,
     dest: &Path,
     place: impl FnOnce(&Path, &Path) -> io::Result<()>,
+    persist: impl FnOnce(&Path) -> io::Result<()>,
 ) -> Result<(), PublishError> {
     let backup = if dest.exists() {
         let bak = container_tmp_zip();
@@ -300,15 +306,17 @@ fn publish_across_volumes_with(
     };
     match place(tmp, dest) {
         Ok(()) => {
-            if let Err(e) = sync_file(dest) {
+            if let Err(e) = persist(dest) {
                 discard_tmp(tmp);
                 return match backup {
                     Some(bak) => Err(PublishError::BackupKept {
                         source: e,
                         backup: bak,
                     }),
-                    // dest はもともと無く、新しい ZIP は既にある。
-                    None => Ok(()),
+                    None => {
+                        let _ = fs::remove_file(dest);
+                        Err(e.into())
+                    }
                 };
             }
             discard_tmp(tmp);
@@ -564,15 +572,20 @@ mod tests {
         fs::write(&dest, b"old").unwrap();
         let tmp = container_tmp_zip();
         fs::write(&tmp, b"new").unwrap();
-        let err = publish_across_volumes_with(&tmp, &dest, |_, dest| {
-            let _ = File::create(dest);
-            let _ = fs::remove_file(dest);
-            let _ = fs::create_dir(dest);
-            Err(io::Error::new(
-                io::ErrorKind::StorageFull,
-                "copy failed after truncate",
-            ))
-        });
+        let err = publish_across_volumes_with(
+            &tmp,
+            &dest,
+            |_, dest| {
+                let _ = File::create(dest);
+                let _ = fs::remove_file(dest);
+                let _ = fs::create_dir(dest);
+                Err(io::Error::new(
+                    io::ErrorKind::StorageFull,
+                    "copy failed after truncate",
+                ))
+            },
+            sync_file,
+        );
         let PublishError::BackupKept { backup, .. } = err.unwrap_err() else {
             panic!("expected BackupKept");
         };
@@ -580,6 +593,37 @@ mod tests {
         assert!(backup.exists());
         assert_eq!(fs::read(&backup).unwrap(), b"old");
         let _ = fs::remove_file(&backup);
+        let _ = fs::remove_dir_all(&dest_root);
+    }
+
+    #[test]
+    fn new_dest_is_removed_when_persist_fails() {
+        let dest_root = std::env::temp_dir().join(format!(
+            "wzjp-xdev-new-sync-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dest_root).unwrap();
+        let dest = dest_root.join("out.zip");
+        let tmp = container_tmp_zip();
+        fs::write(&tmp, b"new").unwrap();
+        let err = publish_across_volumes_with(
+            &tmp,
+            &dest,
+            |src, dst| fs::copy(src, dst).map(|_| ()),
+            |_| {
+                Err(io::Error::new(
+                    io::ErrorKind::StorageFull,
+                    "persist failed",
+                ))
+            },
+        );
+        assert!(err.is_err());
+        assert!(!dest.exists());
+        assert!(!tmp.exists());
         let _ = fs::remove_dir_all(&dest_root);
     }
 
