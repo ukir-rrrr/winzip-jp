@@ -18,6 +18,7 @@ export type Job = {
   kind: JobKind;
   progress: ProgressDto;
   dest: string | null;
+  epoch: number;
 };
 
 export type Sheet = "none" | "open" | "dismissed";
@@ -130,9 +131,11 @@ export const useAppStore = create<AppState>((set, get) => {
     run: (dest: string) => Promise<WriteReport | ExtractReport>,
     noDest: string,
   ): Promise<void> {
-    const epoch = begin({
+    const epoch = get().epoch + 1;
+    set({
+      epoch,
       error: "",
-      job: { kind, progress: startingProgress(), dest: null },
+      job: { kind, progress: startingProgress(), dest: null, epoch },
     });
     try {
       const dest = await pickDest();
@@ -152,6 +155,7 @@ export const useAppStore = create<AppState>((set, get) => {
           kind,
           dest: report.dest,
           progress: doneProgress(report.entriesWritten, report.bytesWritten),
+          epoch,
         },
       });
     } catch (err) {
@@ -188,7 +192,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     setProgress(progress) {
       const job = get().job;
-      if (!job) {
+      if (!job || job.epoch !== get().epoch || progress.phase === "done") {
         return;
       }
       set({ job: { ...job, progress } });
@@ -207,7 +211,7 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ error: get().mode === "create" ? COPY.noFiles : COPY.noZip });
         return;
       }
-      const epoch = begin({ dropped: usable, error: "", job: null });
+      const epoch = begin({ ...emptyWork, dropped: usable, error: "" });
       const api = getApi();
       if (get().mode === "create") {
         try {
@@ -304,13 +308,13 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setEncoding(encoding) {
-      const epoch = get().epoch;
       const archive = get().archivePath;
+      const previous = get().encodingOverride;
       if (!archive) {
         set({ encodingOverride: encoding });
         return;
       }
-      set({ encodingOverride: encoding, error: "" });
+      const epoch = begin({ encodingOverride: encoding, error: "" });
       try {
         const list = await getApi().listArchive(archive, encoding);
         if (!live(epoch) || get().archivePath !== archive) {
@@ -321,7 +325,7 @@ export const useAppStore = create<AppState>((set, get) => {
         if (!live(epoch) || get().archivePath !== archive) {
           return;
         }
-        set({ error: errText(err) });
+        set({ error: errText(err), encodingOverride: previous });
       }
     },
 
@@ -355,7 +359,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     closeJob() {
-      set({ job: null });
+      begin({ job: null });
     },
   };
 });

@@ -182,6 +182,50 @@ describe("世代トークン", () => {
     assert.match(useAppStore.getState().error, /置き換え/);
   });
 
+  it("取り込み開始で古い plan を消す", async () => {
+    let finish!: (plan: typeof S3_PLAN) => void;
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/old"]);
+    assert.equal(useAppStore.getState().plan?.entries[0], "keep.txt");
+    installApi({
+      planArchive: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const next = useAppStore.getState().ingestDropped(["/tmp/e2e/new"]);
+    assert.equal(useAppStore.getState().plan, null);
+    assert.deepEqual(useAppStore.getState().dropped, ["/tmp/e2e/new"]);
+    finish(S3_PLAN);
+    await next;
+    assert.equal(useAppStore.getState().sheet, "open");
+  });
+
+  it("進捗イベントの done は無視する", async () => {
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      pickSaveZip: () => new Promise(() => undefined),
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    const create = useAppStore.getState().createZip();
+    useAppStore.getState().setProgress({
+      phase: "done",
+      currentEntry: null,
+      entriesDone: 1,
+      entriesTotal: 1,
+      bytesDone: 1,
+      bytesTotal: 1,
+    });
+    assert.equal(useAppStore.getState().job?.progress.phase, "starting");
+    void create;
+  });
+
   it("ジョブ中のドロップは無視する", async () => {
     installApi({
       async planArchive() {
