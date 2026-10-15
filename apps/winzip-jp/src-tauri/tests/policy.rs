@@ -54,6 +54,10 @@ fn appstore_entitlements_match_design_section_4_1() {
                 "true".into()
             ),
             (
+                "com.apple.security.network.client".into(),
+                "true".into()
+            ),
+            (
                 "com.apple.application-identifier".into(),
                 "$TEAM_ID.jp.riku.winzip".into()
             ),
@@ -65,7 +69,6 @@ fn appstore_entitlements_match_design_section_4_1() {
     );
     for banned in [
         "downloads.read-write",
-        "network.client",
         "network.server",
         "temporary-exception.files.home-relative-path",
         "files.user-selected.read-only",
@@ -109,6 +112,7 @@ fn fs_scope_does_not_include_home() {
         tauri_dir().join("capabilities/default.json"),
         tauri_dir().join("Cargo.toml"),
         tauri_dir().join("Entitlements.plist"),
+        tauri_dir().join("Info.plist"),
     ];
     if let Ok(entries) = fs::read_dir(tauri_dir().join("capabilities")) {
         for e in entries.filter_map(|e| e.ok()) {
@@ -160,6 +164,15 @@ fn capabilities_are_pinned_to_default() {
         !tauri_dir().join("capabilities/e2e.json").exists(),
         "e2e.json は全ビルドに載るので置かない"
     );
+    let cargo = read(&tauri_dir().join("Cargo.toml"));
+    assert!(
+        cargo.contains("e2e = []"),
+        "e2e feature が default に入っていないこと"
+    );
+    assert!(
+        !cargo.contains("default = [\"e2e\"]") && !cargo.contains("default = [\"e2e\""),
+        "e2e を default feature にしない"
+    );
     let mut names: Vec<String> = fs::read_dir(tauri_dir().join("capabilities"))
         .expect("capabilities")
         .filter_map(|e| e.ok())
@@ -175,4 +188,110 @@ fn cargo_does_not_depend_on_persisted_scope() {
     assert!(!toml.contains("tauri-plugin-persisted-scope"));
     assert!(toml.contains("tauri-plugin-dialog"));
     assert!(toml.contains("tauri-plugin-fs"));
+}
+
+#[test]
+fn info_plist_sets_encryption_and_utility_category() {
+    let plist = read(&tauri_dir().join("Info.plist"));
+    let entries = plist_entries(&plist);
+    assert!(
+        entries
+            .iter()
+            .any(|(k, v)| k == "ITSAppUsesNonExemptEncryption" && v == "true"),
+        "AES-256 があるので非免除の暗号化あり: {entries:?}"
+    );
+    assert!(
+        entries.iter().any(|(k, v)| {
+            k == "LSApplicationCategoryType" && v == "public.app-category.utilities"
+        }),
+        "{entries:?}"
+    );
+    assert!(
+        plist.contains("<key>NSIsRelatedItemType</key>") && plist.contains("<string>z01</string>"),
+        "分割ピースを related item として宣言する"
+    );
+    assert!(
+        !plist.contains("downloads.read-write") && !plist.contains("network.client"),
+        "Info.plist に禁止 entitlement を書かない"
+    );
+
+    for name in ["tauri.conf.json", "tauri.appstore.conf.json"] {
+        let json: serde_json::Value =
+            serde_json::from_str(&read(&tauri_dir().join(name))).expect(name);
+        assert_eq!(
+            json["bundle"]["category"].as_str(),
+            Some("Utility"),
+            "{name} の category"
+        );
+        let info = json["bundle"]["macOS"]["infoPlist"]
+            .as_str()
+            .expect("infoPlist");
+        assert!(info.ends_with("Info.plist"), "{name}: {info}");
+    }
+}
+
+#[test]
+fn e2e_open_is_cfg_gated_in_source() {
+    let lib = read(&tauri_dir().join("src/lib.rs"));
+    assert!(
+        lib.contains("cfg(all(debug_assertions, feature = \"e2e\"))"),
+        "--e2e-open を App Store ビルドに入れない"
+    );
+    assert!(
+        lib.contains("cfg(any(test, all(debug_assertions, feature = \"e2e\")))"),
+        "probe を release / App Store に入れない"
+    );
+    assert!(
+        lib.contains("e2e_open::maybe_run"),
+        "e2e は maybe_run でヘッドレス終了する"
+    );
+    let open = read(&tauri_dir().join("src/e2e_open.rs"));
+    assert!(open.contains("--e2e-open"));
+    assert!(open.contains("--e2e-deny"));
+    assert!(open.contains("--e2e-split-dest"));
+    assert!(
+        !open.contains("--e2e-report"),
+        "レポートは stdout。サンドボックスはワークスペースへ書けない"
+    );
+    assert!(open.contains("maybe_run"), "不完全フラグで GUI に落とさない");
+}
+
+#[test]
+fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
+    let sh = read(&tauri_dir().join("../scripts/sandbox-e2e.sh"));
+    assert!(
+        sh.contains("送りZIP.app"),
+        "バンドルパスを find | head にしない"
+    );
+    assert!(
+        !sh.contains("| head -1") && !sh.contains("| head -n 1"),
+        "find | head で別 .app を拾わない"
+    );
+    assert!(
+        sh.contains("data.pop(key") && sh.contains("grep -qF '$TEAM_ID'"),
+        "署名前に TEAM_ID キーを剥がし、署名後 XML でも残存を落とす"
+    );
+    assert!(
+        !sh.contains("if ! sign"),
+        "TEAM_ID 除去を codesign 失敗後のフォールバックにしない"
+    );
+    assert!(
+        !sh.contains("--e2e-report") && sh.contains("> \"$REPORT\""),
+        "probe JSON は stdout リダイレクト。サンドボックスは成果物ディレクトリへ書けない"
+    );
+    assert!(
+        !sh.contains("codesign --force --deep"),
+        "codesign --deep は WebView ヘルパーを壊す"
+    );
+    let pkg = read(&tauri_dir().join("../scripts/appstore-pkg.sh"));
+    assert!(pkg.contains("送りZIP.app"));
+    assert!(!pkg.contains("| head -1") && !pkg.contains("| head -n 1"));
+    assert!(
+        pkg.contains("Info.plist がありません"),
+        "Info.plist 欠落をスキップしない"
+    );
+    assert!(
+        !pkg.contains("if strings \"$BIN\" | grep"),
+        "strings|grep の pipefail fail-open にしない"
+    );
 }

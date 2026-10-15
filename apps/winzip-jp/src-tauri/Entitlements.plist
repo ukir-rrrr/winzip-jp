@@ -8,6 +8,9 @@
 	<true/>
 	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
+	<!-- WKWebView の WebContent がローカル IPC に outgoing を要求する。アプリ層の HTTP は持たない。 -->
+	<key>com.apple.security.network.client</key>
+	<true/>
 	<!-- 設計 §4.1 の placeholder。提出用の実値はプロビジョニング側。 -->
 	<key>com.apple.application-identifier</key>
 	<string>$TEAM_ID.jp.riku.winzip</string>

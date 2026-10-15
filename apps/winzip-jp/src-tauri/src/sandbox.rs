@@ -269,6 +269,11 @@ pub fn is_container_tmp(path: &Path) -> bool {
 
 /// コンテナの分割ピースを、同じ stem の最終パスへ順に公開する。
 /// 失敗時は今回作った dest だけ消し、もともとあった dest は退避から戻す。
+///
+/// 親フォルダ entitlement は足さない（設計 §4.1）。MAS では
+/// `Info.plist` の `NSIsRelatedItemType`（`.zNN`）で related-item を宣言する。
+/// カーネルが兄弟ピースの作成を拒んだときは `PermissionDenied` →
+/// 「保存先へ移せませんでした: 権限がありません」。
 pub fn publish_tmp_set(tmp_vols: &[PathBuf], dest_vols: &[PathBuf]) -> Result<(), PublishError> {
     if tmp_vols.len() != dest_vols.len() || tmp_vols.is_empty() {
         return Err(

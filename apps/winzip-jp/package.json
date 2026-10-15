@@ -9,6 +9,8 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "tauri": "tauri",
     "build:debug": "tauri build --debug --bundles app",
+    "build:sandbox-e2e": "tauri build --debug --config src-tauri/tauri.appstore.conf.json --features e2e --bundles app",
+    "build:appstore": "tauri build --config src-tauri/tauri.appstore.conf.json --bundles app",
     "test": "tsx --test src/replacements.test.ts src/store.test.ts src/api.test.ts",
     "e2e": "node e2e/run.mjs",
     "e2e:tauri": "wdio run e2e/wdio.tauri.conf.ts"

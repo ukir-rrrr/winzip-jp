@@ -2,6 +2,12 @@ mod commands;
 mod dto;
 mod sandbox;
 
+#[cfg(any(test, all(debug_assertions, feature = "e2e")))]
+mod probe;
+
+#[cfg(all(debug_assertions, feature = "e2e"))]
+mod e2e_open;
+
 use commands::{grant_dropped, AppState, DROPPED_EVENT};
 use tauri::Emitter;
 use tauri::Manager;
@@ -15,6 +21,11 @@ pub use sandbox::Sandbox;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(all(debug_assertions, feature = "e2e"))]
+    if let Some(code) = e2e_open::maybe_run() {
+        std::process::exit(code);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

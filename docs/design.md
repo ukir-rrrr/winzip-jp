@@ -102,7 +102,7 @@ AES 付き・分割付きは「先方が 7-Zip / Lhaplus / WinZip を持つ場�
 | N7 | クラッシュしても入力ファイルを消さない。出力は一時ファイルから rename |
 | N8 | UI は macOS 15 の GitHub Actions 上でスクリーンショット回帰 |
 | N9 | VoiceOver で作成・解凍・キャンセルが辿れる（最低限） |
-| N10 | MVP はオフライン完結。解析用の外部送信なし。ネットワーク entitlement を付けない |
+| N10 | MVP はオフライン完結。解析用の外部送信なし。アプリ層の HTTP は持たない。WKWebView のローカル IPC に必要な `network.client` 以外のネットワーク entitlement は付けない |
 
 ### 1.4 明示的に後回し（1.0 に入れない）
 
@@ -430,13 +430,14 @@ AES のパスワードは **UTF-8 バイト**（WinZip / 7-Zip と同じ）。�
 <key>com.apple.security.app-sandbox</key><true/>
 <key>com.apple.security.files.user-selected.read-write</key><true/>
 <key>com.apple.security.files.bookmarks.app-scope</key><true/>
+<key>com.apple.security.network.client</key><true/>
 <key>com.apple.application-identifier</key>
 <string>$TEAM_ID.jp.riku.winzip</string>
 <key>com.apple.developer.team-identifier</key>
 <string>$TEAM_ID</string>
 ```
 
-`com.apple.security.files.downloads.read-write` やホーム包括は付けない。一時ファイルはコンテナの `NSTemporaryDirectory` だけ。ネットワーク entitlement は付けない（N10）。
+`com.apple.security.files.downloads.read-write` やホーム包括は付けない。一時ファイルはコンテナの `NSTemporaryDirectory` だけ。`network.server` は付けない。`network.client` は WKWebView の WebContent がローカル IPC に outgoing を要求するためだけで、アプリ層の HTTP クライアントは持たない（N10）。
 
 AES を含むため `ITSAppUsesNonExemptEncryption` は提出前に確定する（§9）。開発中は `false` で進める。
 

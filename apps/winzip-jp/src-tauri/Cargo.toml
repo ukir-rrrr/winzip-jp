@@ -22,5 +22,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 zipcore = { path = "../../../crates/zipcore" }
 
+[features]
+default = []
+e2e = []
+
 [dev-dependencies]
 zipcore = { path = "../../../crates/zipcore" }
