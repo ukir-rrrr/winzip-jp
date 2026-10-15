@@ -2,6 +2,8 @@
 
 use std::path::{Component, Path};
 
+use crate::encoding::NameEncoding;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NameReject {
     /// `..` / 絶対パス / ドライブレター / `:` / 区切りとしての `\`。
@@ -32,13 +34,16 @@ pub(crate) fn unsafe_component(component: &str) -> bool {
     component_reject(component).is_some()
 }
 
-/// 末尾 `/`、または先頭から見たとき単独バイトの末尾 `\` だけをディレクトリとみなす。
-pub(crate) fn zip_name_is_dir(raw: &[u8]) -> bool {
+/// 末尾 `/` は常にディレクトリ。末尾 `\` は UTF-8 では区切り、CP932 では文字境界を見る。
+pub(crate) fn zip_name_is_dir(raw: &[u8], encoding: NameEncoding) -> bool {
     if raw.ends_with(b"/") {
         return true;
     }
     if !raw.ends_with(b"\\") {
         return false;
+    }
+    if encoding != NameEncoding::Cp932 {
+        return true;
     }
     let mut i = 0;
     let mut last_start = 0;
@@ -270,12 +275,17 @@ mod tests {
 
     #[test]
     fn zip_name_dir_uses_cp932_boundaries() {
-        assert!(!zip_name_is_dir(&[0x95, 0x5C]));
-        assert!(!zip_name_is_dir(&[0x83, 0x5C]));
-        assert!(!zip_name_is_dir(&[0x88, 0x9F]));
-        assert!(zip_name_is_dir(b"dir/"));
-        assert!(zip_name_is_dir(br"dir\"));
-        assert!(zip_name_is_dir(&[0x95, 0x5C, b'\\']));
-        assert!(zip_name_is_dir(&[0x88, 0x9F, b'\\']));
+        use NameEncoding::{Cp932, Utf8};
+        assert!(!zip_name_is_dir(&[0x95, 0x5C], Cp932));
+        assert!(!zip_name_is_dir(&[0x83, 0x5C], Cp932));
+        assert!(!zip_name_is_dir(&[0x88, 0x9F], Cp932));
+        assert!(zip_name_is_dir(b"dir/", Cp932));
+        assert!(zip_name_is_dir(br"dir\", Cp932));
+        assert!(zip_name_is_dir(&[0x95, 0x5C, b'\\'], Cp932));
+        assert!(zip_name_is_dir(&[0x88, 0x9F, b'\\'], Cp932));
+        let mut sho = "書類".as_bytes().to_vec();
+        sho.push(b'\\');
+        assert!(zip_name_is_dir(&sho, Utf8));
+        assert!(!zip_name_is_dir(&sho, Cp932));
     }
 }

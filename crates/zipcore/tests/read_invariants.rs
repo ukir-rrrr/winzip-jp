@@ -382,6 +382,40 @@ fn extract_cp932_name_plus_standalone_backslash_is_dir() {
 }
 
 #[test]
+fn extract_utf8_backslash_dir_does_not_collide_with_child() {
+    let tmp = support::TempDir::new();
+    let mut dir = "書類".as_bytes().to_vec();
+    dir.push(b'\\');
+    let child = "書類/こんにちは.txt".as_bytes();
+    let zip = tmp.path().join("u.zip");
+    write_stored_zip(
+        &zip,
+        &[(&dir, b"", EFS_UTF8_BIT), (child, b"hi", EFS_UTF8_BIT)],
+    );
+    let dest = tmp.path().join("out");
+    fs::create_dir_all(&dest).unwrap();
+    let listed = list_auto(&zip);
+    assert!(
+        listed
+            .entries
+            .iter()
+            .any(|e| e.is_dir && e.display_name.replace('\\', "/") == "書類/"),
+        "{listed:?}"
+    );
+    extract_zip(
+        extract_req(zip, dest.clone(), false),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(dest.join("書類").is_dir());
+    assert_eq!(
+        fs::read(dest.join("書類").join("こんにちは.txt")).unwrap(),
+        b"hi"
+    );
+}
+
+#[test]
 fn extract_nfd_utf8_name_writes_nfc() {
     let tmp = support::TempDir::new();
     let nfd = "か\u{3099}.txt";

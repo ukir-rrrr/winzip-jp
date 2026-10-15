@@ -352,7 +352,6 @@ fn catalog_archive(
         let name_raw = file.name_raw().to_vec();
         let extra = file.extra_data().unwrap_or_default();
         let gpbf = file.flags().as_u16();
-        let is_dir = zip_name_is_dir(&name_raw);
         let encrypted = file.encrypted();
         let is_symlink = file.is_symlink();
         let uncompressed_size = file.size();
@@ -360,7 +359,7 @@ fn catalog_archive(
         let crc = file.crc32();
         drop(file);
 
-        if !is_dir {
+        if !name_raw.ends_with(b"/") {
             if uncompressed_size > MAX_ENTRY_UNCOMPRESSED {
                 return Err(ZipcoreError::LimitsExceeded {
                     reason: format!("1 エントリが {MAX_ENTRY_UNCOMPRESSED} バイトを超えています"),
@@ -383,7 +382,6 @@ fn catalog_archive(
         raw_entries.push(RawMeta {
             index: i,
             name_raw,
-            is_dir,
             encrypted,
             is_symlink,
             uncompressed_size,
@@ -412,13 +410,14 @@ fn catalog_archive(
                 entry: display_name,
             });
         }
-        dests.insert(&display_name, raw.is_dir)?;
+        let is_dir = zip_name_is_dir(&raw.name_raw, encoding);
+        dests.insert(&display_name, is_dir)?;
         entries.push(Indexed {
             index: raw.index,
             listed: ListedEntry {
                 name_raw: raw.name_raw,
                 display_name,
-                is_dir: raw.is_dir,
+                is_dir,
                 uncompressed_size: raw.uncompressed_size,
                 compressed_size: raw.compressed_size,
                 crc: raw.crc,
@@ -437,7 +436,6 @@ fn catalog_archive(
 struct RawMeta {
     index: usize,
     name_raw: Vec<u8>,
-    is_dir: bool,
     encrypted: bool,
     is_symlink: bool,
     uncompressed_size: u64,
