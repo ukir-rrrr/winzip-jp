@@ -255,16 +255,47 @@ pub fn publish_tmp(tmp: &Path, dest: &Path) -> io::Result<()> {
         file.sync_all()?;
         drop(file);
     }
-    if fs::rename(tmp, dest).is_ok() {
-        return Ok(());
+    match fs::rename(tmp, dest) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => publish_across_volumes(tmp, dest),
+        Err(e) => {
+            discard_tmp(tmp);
+            Err(e)
+        }
     }
-    // 別ボリューム。dest だけを上書きし、親に sidecar を作らない。
-    if let Err(e) = fs::copy(tmp, dest) {
-        let _ = fs::remove_file(tmp);
-        return Err(e);
+}
+
+/// 別ボリュームでは dest を直接 copy する。失敗時は既存 dest をコンテナ退避から戻す。
+fn publish_across_volumes(tmp: &Path, dest: &Path) -> io::Result<()> {
+    let backup = if dest.exists() {
+        let bak = container_tmp_zip();
+        if let Err(e) = fs::copy(dest, &bak) {
+            discard_tmp(tmp);
+            return Err(e);
+        }
+        Some(bak)
+    } else {
+        None
+    };
+    match fs::copy(tmp, dest) {
+        Ok(_) => {
+            discard_tmp(tmp);
+            if let Some(bak) = backup {
+                let _ = fs::remove_file(bak);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if let Some(bak) = backup {
+                let _ = fs::copy(&bak, dest);
+                let _ = fs::remove_file(bak);
+            } else {
+                let _ = fs::remove_file(dest);
+            }
+            discard_tmp(tmp);
+            Err(e)
+        }
     }
-    let _ = fs::remove_file(tmp);
-    Ok(())
 }
 
 pub fn discard_tmp(tmp: &Path) {
@@ -384,6 +415,61 @@ mod tests {
             .collect();
         assert_eq!(leftover, vec!["out.zip".to_string()]);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publish_across_volumes_keeps_old_dest_when_copy_cannot_write() {
+        use std::os::unix::fs::PermissionsExt;
+        let dest_root = std::env::temp_dir().join(format!(
+            "wzjp-xdev-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dest_root).unwrap();
+        let dest = dest_root.join("out.zip");
+        fs::write(&dest, b"old").unwrap();
+        let tmp = container_tmp_zip();
+        fs::write(&tmp, b"new").unwrap();
+        let mut perm = fs::metadata(&dest).unwrap().permissions();
+        perm.set_mode(0o444);
+        fs::set_permissions(&dest, perm).unwrap();
+        assert!(publish_across_volumes(&tmp, &dest).is_err());
+        assert_eq!(fs::read(&dest).unwrap(), b"old");
+        assert!(!tmp.exists());
+        let mut perm = fs::metadata(&dest).unwrap().permissions();
+        perm.set_mode(0o644);
+        fs::set_permissions(&dest, perm).unwrap();
+        let _ = fs::remove_dir_all(&dest_root);
+    }
+
+    #[test]
+    fn publish_across_volumes_overwrites_without_parent_sidecar() {
+        let dest_root = std::env::temp_dir().join(format!(
+            "wzjp-xdev-ok-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dest_root).unwrap();
+        let dest = dest_root.join("out.zip");
+        fs::write(&dest, b"old").unwrap();
+        let tmp = container_tmp_zip();
+        fs::write(&tmp, b"new").unwrap();
+        publish_across_volumes(&tmp, &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"new");
+        assert!(!tmp.exists());
+        let leftover: Vec<_> = fs::read_dir(&dest_root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(leftover, vec!["out.zip".to_string()]);
+        let _ = fs::remove_dir_all(&dest_root);
     }
 
     #[test]
