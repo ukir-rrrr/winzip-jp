@@ -12,7 +12,7 @@ use serde::Deserialize;
 use unicode_normalization::UnicodeNormalization;
 use zipcore::{
     extract_zip, inspect_zip_headers, plan_write, write_zip, AesMode, ExtractRequest, InputItem,
-    WriteRequest, EFS_UTF8_BIT,
+    SecretString, WriteRequest, EFS_UTF8_BIT,
 };
 
 #[derive(Debug, Deserialize)]
@@ -22,6 +22,8 @@ struct Expected {
     excluded: Vec<String>,
     #[serde(default)]
     replacements: BTreeMap<String, String>,
+    #[serde(default)]
+    password: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,7 +181,11 @@ fn write_case(case: &Case, payload: &Path, dest: &Path) -> zipcore::WriteReport 
     let req = WriteRequest {
         inputs: case_inputs(payload),
         dest: dest.to_path_buf(),
-        password: None,
+        password: case
+            .expected
+            .password
+            .as_ref()
+            .map(|s| SecretString::new(s.as_str())),
         aes: AesMode::Aes256,
         split_bytes: None,
         replacements: case.expected.replacements.clone(),
@@ -209,15 +215,25 @@ fn assert_headers(case: &Case, zip: &Path) {
         "{} header set mismatch\ngot: {got:?}\nwant: {want:?}",
         case.dir.file_name().unwrap().to_string_lossy()
     );
+    let aes_case = case.expected.password.is_some();
     for e in &entries {
         assert_eq!(e.gpbf & EFS_UTF8_BIT, 0);
-        assert_eq!(e.gpbf & 1, 0);
         assert_eq!(e.host_os, 0);
         assert!(!e.has_unicode_path_extra());
-        assert!(e.extra_local.is_empty() && e.extra_central.is_empty());
+        if e.gpbf & 1 != 0 {
+            assert!(aes_case, "unexpected encrypt bit on {}", hex(&e.name_raw));
+            assert_eq!(e.method, 99);
+            assert!(e.has_aes_extra(), "AES extra 0x9901 missing");
+        } else {
+            assert_eq!(e.gpbf & 1, 0);
+            assert!(e.extra_local.is_empty() && e.extra_central.is_empty());
+        }
     }
     for e in &case.expected.entries {
         assert_eq!(e.gpbf & EFS_UTF8_BIT, 0, "expected.json gpbf bit 11");
+        if aes_case && e.method != 0 {
+            assert_eq!(e.gpbf & 1, 1, "AES file must set bit 0");
+        }
     }
     let _ = &case.expected.excluded;
 }
@@ -272,6 +288,10 @@ fn windows_extract_ps1_is_utf8_bom_ascii() {
     assert!(
         text.contains(r#"& "$Seven""#),
         "7-Zip invocation must quote the executable path"
+    );
+    assert!(
+        text.contains("optional extractors skipped for password ZIP"),
+        "AES cases must skip Explorer/tar/Shell so the job cannot hang on a password prompt"
     );
 }
 
@@ -387,7 +407,11 @@ fn golden_extract_bytes_match_source() {
                 dest: dest.clone(),
                 encoding: None,
                 overwrite: false,
-                password: None,
+                password: case
+                    .expected
+                    .password
+                    .as_ref()
+                    .map(|s| SecretString::new(s.as_str())),
             },
             |_| {},
             &AtomicBool::new(false),

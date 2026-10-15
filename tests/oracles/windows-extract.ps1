@@ -73,9 +73,18 @@ if ($LASTEXITCODE -ne 0) {
 
 $SevenOut = Join-Path $WorkDir '7z'
 New-Item -ItemType Directory -Force -Path $SevenOut | Out-Null
+$expectObj = Get-Content -Raw -Encoding UTF8 -LiteralPath $ExpectPath | ConvertFrom-Json
+$password = $null
+if ($null -ne $expectObj.password -and "$($expectObj.password)" -ne '') {
+    $password = [string]$expectObj.password
+}
 Write-Host '7z x -mcp=932'
 $outSwitch = '-o' + $SevenOut
-& "$Seven" x -y '-mcp=932' $outSwitch "$ZipPath"
+if ($password) {
+    & "$Seven" x -y '-mcp=932' ("-p" + $password) $outSwitch "$ZipPath"
+} else {
+    & "$Seven" x -y '-mcp=932' $outSwitch "$ZipPath"
+}
 if ($LASTEXITCODE -ne 0) {
     throw '7-Zip extract failed'
 }
@@ -138,23 +147,29 @@ function Report-OptionalExtract {
     }
 }
 
-$ExpandDir = Join-Path $WorkDir 'expand-archive'
-Report-OptionalExtract -Label 'Expand-Archive' -OutDir $ExpandDir -Extract {
-    Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExpandDir -Force
-}
+# AES ZIP: Explorer / tar / Shell.Application cannot open it and may hang
+# on a password prompt. Required path is 7-Zip only.
+if ($password) {
+    Write-Host 'optional extractors skipped for password ZIP'
+} else {
+    $ExpandDir = Join-Path $WorkDir 'expand-archive'
+    Report-OptionalExtract -Label 'Expand-Archive' -OutDir $ExpandDir -Extract {
+        Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExpandDir -Force
+    }
 
-$TarDir = Join-Path $WorkDir 'tar'
-Report-OptionalExtract -Label 'tar' -OutDir $TarDir -Extract {
-    tar -xf $ZipPath -C $TarDir
-}
+    $TarDir = Join-Path $WorkDir 'tar'
+    Report-OptionalExtract -Label 'tar' -OutDir $TarDir -Extract {
+        tar -xf $ZipPath -C $TarDir
+    }
 
-$ShellDir = Join-Path $WorkDir 'shell-application'
-Report-OptionalExtract -Label 'Shell.Application' -OutDir $ShellDir -Extract {
-    $shell = New-Object -ComObject Shell.Application
-    $zipItem = $shell.NameSpace((Resolve-Path -LiteralPath $ZipPath).Path)
-    $destNs = $shell.NameSpace((Resolve-Path -LiteralPath $ShellDir).Path)
-    $destNs.CopyHere($zipItem.Items(), 0x14)
-    Start-Sleep -Seconds 2
+    $ShellDir = Join-Path $WorkDir 'shell-application'
+    Report-OptionalExtract -Label 'Shell.Application' -OutDir $ShellDir -Extract {
+        $shell = New-Object -ComObject Shell.Application
+        $zipItem = $shell.NameSpace((Resolve-Path -LiteralPath $ZipPath).Path)
+        $destNs = $shell.NameSpace((Resolve-Path -LiteralPath $ShellDir).Path)
+        $destNs.CopyHere($zipItem.Items(), 0x14)
+        Start-Sleep -Seconds 2
+    }
 }
 
 Write-Host 'windows-extract.ps1: required checks passed'

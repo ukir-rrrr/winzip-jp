@@ -7,13 +7,19 @@ publish.workspace = true
 description = "CP932 向け ZIP のエンコーディング・作成・解凍・分割（PR 3 は解凍）"
 
 [dependencies]
+aes = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crc32fast = "1"
 encoding_rs = "0.8"
 flate2 = "1"
+getrandom = "0.2"
+hmac = "0.12"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 serde = { version = "1", features = ["derive"] }
+sha1 = { version = "0.10", default-features = false }
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
+zeroize = { version = "1", features = ["alloc", "zeroize_derive"] }
 zip = { version = "9.0.3", default-features = false, features = ["deflate-flate2", "aes-crypto"] }
 
 [dev-dependencies]

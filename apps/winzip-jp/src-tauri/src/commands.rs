@@ -125,7 +125,7 @@ fn planned_sources_in_scope(sandbox: &Sandbox, inputs: &[InputItem]) -> Result<(
 
 pub fn create_archive_direct(
     sandbox: &Sandbox,
-    req: &CreateDto,
+    mut req: CreateDto,
     dest: &str,
     mut progress: impl FnMut(Progress),
     cancel: &AtomicBool,
@@ -142,22 +142,33 @@ pub fn create_archive_direct(
         }));
     }
 
+    let password = req.take_password()?;
+    let encrypted = password.is_some();
     let tmp = TmpGuard(container_tmp_zip());
     let write_req = WriteRequest {
         inputs,
         dest: tmp.0.clone(),
-        password: None,
+        password,
         aes: AesMode::Aes256,
         split_bytes: None,
         replacements: req.replacements.clone(),
     };
     let report = write_zip(write_req, &mut progress, cancel).map_err(map_err)?;
-    if inspect_zip_headers(&tmp.0)
-        .map_err(map_err)?
-        .iter()
-        .any(|e| e.gpbf & EFS_UTF8_BIT != 0)
-    {
+    let headers = inspect_zip_headers(&tmp.0).map_err(map_err)?;
+    if headers.iter().any(|e| e.gpbf & EFS_UTF8_BIT != 0) {
         return Err("ファイル名の UTF-8 フラグが立っています".into());
+    }
+    if !encrypted && headers.iter().any(|e| e.gpbf & 1 != 0) {
+        return Err("パスワードなしの ZIP に暗号フラグが立っています".into());
+    }
+    if encrypted {
+        let files: Vec<_> = headers
+            .iter()
+            .filter(|e| !e.name_raw.ends_with(b"/"))
+            .collect();
+        if files.is_empty() || files.iter().any(|e| e.gpbf & 1 == 0 || !e.has_aes_extra()) {
+            return Err("暗号化ヘッダが不正です".into());
+        }
     }
     publish_tmp(&tmp.0, &dest).map_err(publish_err_ja)?;
     Ok(WriteReportDto::from(report).with_dest(&dest))
@@ -286,7 +297,9 @@ fn file_path_to_buf(path: tauri_plugin_dialog::FilePath) -> Result<PathBuf, Stri
 }
 
 pub fn names_are_ready(names: &[String]) -> bool {
-    names.iter().all(|name| encode_entry_name(name).issues.is_empty())
+    names
+        .iter()
+        .all(|name| encode_entry_name(name).issues.is_empty())
 }
 
 #[tauri::command]
@@ -324,7 +337,7 @@ pub async fn create_archive(
         let snapshot = lock_sandbox(&sandbox)?.snapshot_paths();
         create_archive_direct(
             &snapshot,
-            &req,
+            req,
             &dest,
             |p| emit_progress(&window, &p),
             &cancel,

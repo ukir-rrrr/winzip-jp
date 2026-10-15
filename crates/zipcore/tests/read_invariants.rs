@@ -753,7 +753,7 @@ fn first_progress_is_starting() {
 }
 
 #[test]
-fn password_is_not_implemented() {
+fn empty_password_is_rejected_on_extract() {
     let tmp = support::TempDir::new();
     let zip = tmp.path().join("a.zip");
     write_stored_zip(&zip, &[(b"a.txt", b"hi", 0)]);
@@ -765,13 +765,13 @@ fn password_is_not_implemented() {
             dest,
             encoding: None,
             overwrite: false,
-            password: Some(SecretString::new("secret")),
+            password: Some(SecretString::new("")),
         },
         |_| {},
         &AtomicBool::new(false),
     )
     .unwrap_err();
-    assert!(matches!(err, ZipcoreError::AesNotImplemented));
+    assert!(matches!(err, ZipcoreError::EmptyPassword));
 }
 
 #[test]

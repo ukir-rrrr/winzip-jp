@@ -1,12 +1,13 @@
 //! Windows 向け ZIP のファイル名とフラグを自前で扱うコア。
 //!
 //! モジュール境界は `encoding` / `write` / `read` / `split`。
-//! PR 3 は `encoding` / `write` / `read`（非暗号・非分割）。
+//! PR 6 は `encoding` / `write` / `read`（AES-256 AE-2 任意、非分割）。
 
 pub mod encoding;
 pub mod read;
 pub mod write;
 
+mod aeswrite;
 mod error;
 mod fsutil;
 mod job;

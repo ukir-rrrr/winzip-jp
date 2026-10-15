@@ -37,6 +37,8 @@ export type AppState = {
   list: ListReport | null;
   archivePath: string | null;
   encodingOverride: NameEncoding | null;
+  aesEnabled: boolean;
+  password: string;
   job: Job | null;
   confirming: boolean;
   epoch: number;
@@ -50,6 +52,8 @@ export type AppState = {
   dismissSheet: () => void;
   confirmAndCreate: () => Promise<void>;
   createZip: () => Promise<void>;
+  setAesEnabled: (on: boolean) => void;
+  setPassword: (password: string) => void;
   setEncoding: (encoding: NameEncoding) => Promise<void>;
   extractZip: () => Promise<void>;
   cancel: () => Promise<void>;
@@ -169,6 +173,7 @@ export const useAppStore = create<AppState>((set, get) => {
           dest: report.dest,
           progress: doneProgress(report.entriesWritten, report.bytesWritten),
         },
+        password: kind === "create" ? "" : get().password,
       });
     } catch (err) {
       if (!live(epoch)) {
@@ -187,12 +192,26 @@ export const useAppStore = create<AppState>((set, get) => {
   }
 
   function startCreate(replacements: Record<string, string>): Promise<void> {
-    const { dropped, plan } = get();
+    const { dropped, plan, aesEnabled, password } = get();
+    if (aesEnabled && password.length === 0) {
+      set({ error: COPY.emptyPassword, job: null });
+      return Promise.resolve();
+    }
+    const sentPassword = aesEnabled ? password : null;
     return runJob(
       "create",
       () => getApi().pickSaveZip(destHint(plan, "archive.zip")),
-      (dest) =>
-        getApi().createArchive({ paths: dropped, replacements: normalizeReplacements(replacements) }, dest),
+      (dest) => {
+        set({ password: "" });
+        return getApi().createArchive(
+          {
+            paths: dropped,
+            replacements: normalizeReplacements(replacements),
+            password: sentPassword,
+          },
+          dest,
+        );
+      },
       COPY.noDest,
     );
   }
@@ -200,13 +219,36 @@ export const useAppStore = create<AppState>((set, get) => {
   return {
     mode: "create",
     epoch: 0,
+    aesEnabled: false,
+    password: "",
     ...emptyWork,
 
     setMode(mode) {
       if (isBlocked()) {
         return;
       }
-      begin({ mode, ...emptyWork });
+      begin({ mode, aesEnabled: false, password: "", ...emptyWork });
+    },
+
+    setAesEnabled(on) {
+      if (isBlocked()) {
+        return;
+      }
+      set({
+        aesEnabled: on,
+        password: on ? get().password : "",
+        error: !on && get().error === COPY.emptyPassword ? "" : get().error,
+      });
+    },
+
+    setPassword(password) {
+      if (isBlocked()) {
+        return;
+      }
+      set({
+        password,
+        error: get().error === COPY.emptyPassword && password.length > 0 ? "" : get().error,
+      });
     },
 
     setProgress(progress) {

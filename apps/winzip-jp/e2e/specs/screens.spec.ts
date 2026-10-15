@@ -15,7 +15,7 @@ async function openScene(id?: string): Promise<void> {
   await $("[data-testid='app-shell']").waitForDisplayed();
 }
 
-describe("画面 S1–S8", () => {
+describe("画面 S1–S9", () => {
   it("S1 起動: 作成ドロップゾーンと VoiceOver 名", async () => {
     await openScene();
     const create = $("[data-testid='tab-create']");
@@ -28,6 +28,7 @@ describe("画面 S1–S8", () => {
     );
     const body = await $("body").getText();
     expect(body).toContain("Windows で開ける形式（CP932）で保存します");
+    expect(body).not.toContain("Windows のエクスプローラーでは開けません");
     await shot("s1");
   });
 
@@ -108,6 +109,19 @@ describe("画面 S1–S8", () => {
     const dest = await browser.execute(() => window.__WINZIP_E2E__?.getState().lastDest ?? "");
     expect(dest).toContain("/tmp/e2e/展開");
     await shot("s8");
+  });
+
+  it("S9 AES オプション: エクスプローラー警告", async () => {
+    await openScene();
+    await $("[data-testid='aes-toggle']").click();
+    await expect($("[data-testid='aes-toggle']")).toHaveAttribute("aria-checked", "true");
+    await expect($("[data-testid='aes-warning']")).toHaveText(
+      "パスワード付き ZIP は、Windows のエクスプローラーでは開けません。7-Zip などが必要です。",
+    );
+    const body = await $("body").getText();
+    expect(body).toContain("Windows のエクスプローラーでは開けません");
+    expect(body).toContain("先方も UTF-8 前提のツールに限ります");
+    await shot("s9");
   });
 
   it("展開 CRC 不一致は英語頭字語を出さない", async () => {

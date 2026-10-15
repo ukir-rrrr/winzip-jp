@@ -69,6 +69,7 @@ pub struct ExtractReport {
 struct Indexed {
     index: usize,
     listed: ListedEntry,
+    encrypted: bool,
 }
 
 struct Catalog {
@@ -101,8 +102,10 @@ pub fn extract_zip(
         bytes_total: 0,
     });
     check_cancel(cancel)?;
-    if req.password.is_some() {
-        return Err(ZipcoreError::AesNotImplemented);
+    if let Some(ref password) = req.password {
+        if password.is_empty() {
+            return Err(ZipcoreError::EmptyPassword);
+        }
     }
     if !req.archive.exists() {
         return Err(ZipcoreError::InputMissing {
@@ -120,6 +123,17 @@ pub fn extract_zip(
 
     let mut archive = open_archive(&req.archive)?;
     let catalog = catalog_archive(&mut archive, req.encoding)?;
+    if req.password.is_none() {
+        if let Some(entry) = catalog
+            .entries
+            .iter()
+            .find(|e| e.encrypted && !e.listed.is_dir)
+        {
+            return Err(ZipcoreError::Encrypted {
+                entry: entry.listed.display_name.clone(),
+            });
+        }
+    }
     let bytes_total: u64 = catalog
         .entries
         .iter()
@@ -150,6 +164,7 @@ pub fn extract_zip(
     let result = extract_planned(
         &mut archive,
         &planned,
+        req.password.as_ref(),
         &mut session,
         entries_total,
         bytes_total,
@@ -179,6 +194,7 @@ pub fn extract_zip(
 fn extract_planned(
     archive: &mut ZipArchive<File>,
     planned: &[PlannedOutput<'_>],
+    password: Option<&SecretString>,
     session: &mut ExtractSession,
     entries_total: u32,
     bytes_total: u64,
@@ -207,6 +223,7 @@ fn extract_planned(
             let written = extract_one_file(
                 archive,
                 item,
+                password,
                 session,
                 progress,
                 Progress {
@@ -243,6 +260,7 @@ fn extract_planned(
 fn extract_one_file(
     archive: &mut ZipArchive<File>,
     item: &PlannedOutput<'_>,
+    password: Option<&SecretString>,
     session: &mut ExtractSession,
     progress: &mut impl FnMut(Progress),
     snap: Progress,
@@ -254,14 +272,18 @@ fn extract_one_file(
     session.temps.push(tmp.clone());
 
     let name = &item.entry.listed.display_name;
-    let mut src = archive
-        .by_index(item.entry.index)
-        .map_err(|e| zip_err(e, name))?;
-    if src.encrypted() {
-        return Err(ZipcoreError::Encrypted {
+    let mut src = if item.entry.encrypted {
+        let password = password.ok_or_else(|| ZipcoreError::Encrypted {
             entry: name.clone(),
-        });
-    }
+        })?;
+        archive
+            .by_index_decrypt(item.entry.index, password.expose_bytes())
+            .map_err(|e| zip_err(e, name))?
+    } else {
+        archive
+            .by_index(item.entry.index)
+            .map_err(|e| zip_err(e, name))?
+    };
     if src.is_symlink() {
         return Err(ZipcoreError::PathTraversal {
             entry: name.clone(),
@@ -296,7 +318,8 @@ fn extract_one_file(
             "{name} の展開サイズがヘッダと一致しません"
         )));
     }
-    if hasher.finalize() != item.entry.listed.crc {
+    let crc = hasher.finalize();
+    if !(item.entry.encrypted && item.entry.listed.crc == 0) && crc != item.entry.listed.crc {
         return Err(ZipcoreError::Corrupt(format!(
             "{name} の CRC が一致しません"
         )));
@@ -405,11 +428,6 @@ fn catalog_archive(
                 entry: display_name,
             });
         }
-        if raw.encrypted {
-            return Err(ZipcoreError::Encrypted {
-                entry: display_name,
-            });
-        }
         let is_dir = zip_name_is_dir(&raw.name_raw, encoding);
         dests.insert(&display_name, is_dir)?;
         entries.push(Indexed {
@@ -423,6 +441,7 @@ fn catalog_archive(
                 crc: raw.crc,
                 gpbf: raw.gpbf,
             },
+            encrypted: raw.encrypted,
         });
     }
 
@@ -543,6 +562,11 @@ fn zip_err(err: zip::result::ZipError, entry: &str) -> ZipcoreError {
         ZipcoreError::Encrypted { entry: name } if name.is_empty() => ZipcoreError::Encrypted {
             entry: entry.to_string(),
         },
+        ZipcoreError::InvalidPassword { entry: name } if name.is_empty() => {
+            ZipcoreError::InvalidPassword {
+                entry: entry.to_string(),
+            }
+        }
         ZipcoreError::UnsupportedEntry {
             entry: name,
             reason,

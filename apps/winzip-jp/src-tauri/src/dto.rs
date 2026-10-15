@@ -4,12 +4,34 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use zipcore::{ExtractReport, ListReport, ListedEntry, NameEncoding, Plan, Progress, WriteReport};
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateDto {
     pub paths: Vec<String>,
     #[serde(default)]
     pub replacements: BTreeMap<String, String>,
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+impl std::fmt::Debug for CreateDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateDto")
+            .field("paths", &self.paths)
+            .field("replacements", &self.replacements)
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .finish()
+    }
+}
+
+impl CreateDto {
+    pub fn take_password(&mut self) -> Result<Option<zipcore::SecretString>, String> {
+        match self.password.take() {
+            None => Ok(None),
+            Some(s) if s.is_empty() => Err(zipcore::ZipcoreError::EmptyPassword.to_string()),
+            Some(s) => Ok(Some(zipcore::SecretString::new(s))),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -203,6 +225,18 @@ pub fn path_buf(s: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_dto_debug_redacts_password() {
+        let dto = CreateDto {
+            paths: vec!["/tmp/a".into()],
+            replacements: Default::default(),
+            password: Some("hunter2".into()),
+        };
+        let text = format!("{dto:?}");
+        assert!(text.contains("***"));
+        assert!(!text.contains("hunter2"));
+    }
 
     #[test]
     fn unmappable_dto_uses_camel_case() {

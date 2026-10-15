@@ -1,7 +1,7 @@
 //! PKZIP ローカル / 中央ディレクトリ / EOCD の書き込みと検査。
 //!
 //! ファイル名は呼び出し側が渡した CP932 バイトをそのまま書く。UTF-8 化しない。
-//! extra field は空（0x7075 も AES extra も書かない）。
+//! extra field は非 AES なら空。AES なら 0x9901 のみ（0x7075 は書かない）。
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{Datelike, Timelike};
 
+use crate::aeswrite::extra_is_ae2_aes256;
 use crate::encoding::{EFS_UTF8_BIT, UNICODE_PATH_EXTRA_ID};
 use crate::error::ZipcoreError;
 
@@ -28,6 +29,7 @@ pub const VERSION_MADE_BY: u16 = 20 | ((HOST_OS_MSDOS as u16) << 8);
 
 /// 非暗号・非 UTF-8。bit 0 も bit 11 も立てない。
 pub const GPBF_PLAIN: u16 = 0;
+pub use crate::aeswrite::AES_EXTRA_ID;
 
 pub const LOCAL_CRC_OFFSET: u64 = 14;
 pub const DOS_ATTR_ARCHIVE: u32 = 0x20;
@@ -53,11 +55,16 @@ impl InspectedEntry {
         extra_has_id(&self.extra_local, UNICODE_PATH_EXTRA_ID)
             || extra_has_id(&self.extra_central, UNICODE_PATH_EXTRA_ID)
     }
+
+    pub fn has_aes_extra(&self) -> bool {
+        extra_is_ae2_aes256(&self.extra_local) && extra_is_ae2_aes256(&self.extra_central)
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct CentralRecord {
     pub name: Vec<u8>,
+    pub extra: Vec<u8>,
     pub method: u16,
     pub gpbf: u16,
     pub crc: u32,
@@ -66,12 +73,14 @@ pub struct CentralRecord {
     pub local_offset: u32,
     pub dos_time: u16,
     pub dos_date: u16,
+    pub version_needed: u16,
     pub is_dir: bool,
 }
 
 pub fn write_local_header<W: Write>(
     w: &mut W,
     name: &[u8],
+    extra: &[u8],
     method: u16,
     gpbf: u16,
     dos_time: u16,
@@ -79,10 +88,19 @@ pub fn write_local_header<W: Write>(
     crc: u32,
     compressed: u32,
     uncompressed: u32,
+    version_needed: u16,
 ) -> io::Result<()> {
     debug_assert_eq!(gpbf & EFS_UTF8_BIT, 0, "bit 11 must never be set");
+    debug_assert!(
+        extra.is_empty() || extra_has_id(extra, AES_EXTRA_ID),
+        "only AES extra 0x9901 may be written"
+    );
+    debug_assert!(
+        !extra_has_id(extra, UNICODE_PATH_EXTRA_ID),
+        "must not write 0x7075"
+    );
     w.write_all(&SIG_LOCAL.to_le_bytes())?;
-    w.write_all(&VERSION_NEEDED.to_le_bytes())?;
+    w.write_all(&version_needed.to_le_bytes())?;
     w.write_all(&gpbf.to_le_bytes())?;
     w.write_all(&method.to_le_bytes())?;
     w.write_all(&dos_time.to_le_bytes())?;
@@ -91,8 +109,9 @@ pub fn write_local_header<W: Write>(
     w.write_all(&compressed.to_le_bytes())?;
     w.write_all(&uncompressed.to_le_bytes())?;
     w.write_all(&(name.len() as u16).to_le_bytes())?;
-    w.write_all(&0u16.to_le_bytes())?; // extra len
+    w.write_all(&(extra.len() as u16).to_le_bytes())?;
     w.write_all(name)?;
+    w.write_all(extra)?;
     Ok(())
 }
 
@@ -118,8 +137,16 @@ pub fn write_central_header<W: Write>(w: &mut W, rec: &CentralRecord) -> io::Res
         DOS_ATTR_ARCHIVE
     };
     w.write_all(&SIG_CENTRAL.to_le_bytes())?;
+    debug_assert!(
+        rec.extra.is_empty() || extra_has_id(&rec.extra, AES_EXTRA_ID),
+        "only AES extra 0x9901 may be written"
+    );
+    debug_assert!(
+        !extra_has_id(&rec.extra, UNICODE_PATH_EXTRA_ID),
+        "must not write 0x7075"
+    );
     w.write_all(&VERSION_MADE_BY.to_le_bytes())?;
-    w.write_all(&VERSION_NEEDED.to_le_bytes())?;
+    w.write_all(&rec.version_needed.to_le_bytes())?;
     w.write_all(&rec.gpbf.to_le_bytes())?;
     w.write_all(&rec.method.to_le_bytes())?;
     w.write_all(&rec.dos_time.to_le_bytes())?;
@@ -128,13 +155,14 @@ pub fn write_central_header<W: Write>(w: &mut W, rec: &CentralRecord) -> io::Res
     w.write_all(&rec.compressed.to_le_bytes())?;
     w.write_all(&rec.uncompressed.to_le_bytes())?;
     w.write_all(&(rec.name.len() as u16).to_le_bytes())?;
-    w.write_all(&0u16.to_le_bytes())?; // extra
+    w.write_all(&(rec.extra.len() as u16).to_le_bytes())?;
     w.write_all(&0u16.to_le_bytes())?; // comment
     w.write_all(&0u16.to_le_bytes())?; // disk
     w.write_all(&0u16.to_le_bytes())?; // internal attr
     w.write_all(&ext_attr.to_le_bytes())?;
     w.write_all(&rec.local_offset.to_le_bytes())?;
     w.write_all(&rec.name)?;
+    w.write_all(&rec.extra)?;
     Ok(())
 }
 
