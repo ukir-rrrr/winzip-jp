@@ -13,7 +13,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::encoding::{encode_entry_name, is_junk, Unmappable};
 use crate::error::ZipcoreError;
-use crate::fsutil::{absolute, atomic_replace, normalize_lexically, path_eq, stays_under};
+use crate::fsutil::{atomic_replace, path_eq, resolve_existing, resolve_path, stays_under};
 use crate::job::check_cancel;
 use crate::pkzip::{
     inspect_zip, patch_local_sizes, write_central_header, write_eocd, write_local_header,
@@ -599,7 +599,7 @@ fn nfc_os(name: impl Into<PathBuf>) -> String {
 }
 
 fn dest_overlaps_input(dest: &Path, inputs: &[InputItem], plan: &Plan) -> bool {
-    let dest = resolve_dest(dest);
+    let dest = resolve_path(dest);
     inputs.iter().any(|item| {
         let input = resolve_existing(&item.abs_path);
         path_eq(&dest, &input) || (item.as_dir && stays_under(&dest, &input))
@@ -623,24 +623,4 @@ fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
         }
         None => Ok(()),
     }
-}
-
-fn resolve_dest(path: &Path) -> PathBuf {
-    let abs = normalize_lexically(&absolute(path));
-    if let Ok(c) = fs::canonicalize(&abs) {
-        return c;
-    }
-    if let Some(parent) = abs.parent() {
-        if let Ok(pc) = fs::canonicalize(parent) {
-            if let Some(name) = abs.file_name() {
-                return pc.join(name);
-            }
-        }
-    }
-    abs
-}
-
-fn resolve_existing(path: &Path) -> PathBuf {
-    let abs = normalize_lexically(&absolute(path));
-    fs::canonicalize(&abs).unwrap_or(abs)
 }

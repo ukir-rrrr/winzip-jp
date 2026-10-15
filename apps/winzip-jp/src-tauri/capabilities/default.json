@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "メインウィンドウの既定 capability",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

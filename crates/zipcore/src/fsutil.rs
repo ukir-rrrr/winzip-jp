@@ -48,6 +48,30 @@ pub fn path_eq(a: &Path, b: &Path) -> bool {
     a == b || a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
 }
 
+/// 存在するなら canonicalize。未作成なら親を canonicalize してファイル名を足す。
+///
+/// macOS の `/var` → `/private/var` のように、temp の実パスと `temp_dir()` の
+/// 表記が違うときに、grant と判定を同じキーへ揃える。
+pub fn resolve_path(path: &Path) -> PathBuf {
+    let abs = normalize_lexically(&absolute(path));
+    if let Ok(c) = fs::canonicalize(&abs) {
+        return c;
+    }
+    if let Some(parent) = abs.parent() {
+        if let Ok(pc) = fs::canonicalize(parent) {
+            if let Some(name) = abs.file_name() {
+                return pc.join(name);
+            }
+        }
+    }
+    abs
+}
+
+pub fn resolve_existing(path: &Path) -> PathBuf {
+    let abs = normalize_lexically(&absolute(path));
+    fs::canonicalize(&abs).unwrap_or(abs)
+}
+
 /// `child` が `parent` 自身、またはその配下か。
 pub fn stays_under(child: &Path, parent: &Path) -> bool {
     let child = strip_verbatim(&normalize_lexically(child));
@@ -158,6 +182,31 @@ mod tests {
             .collect();
         leftovers.sort();
         assert_eq!(leftovers, vec!["to.bin".to_string()]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_path_follows_symlink_parent() {
+        let (root, _, _) = temp_pair("resolve");
+        let real = root.join("real");
+        fs::create_dir_all(&real).unwrap();
+        let alias = root.join("alias");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&real, &alias).unwrap();
+            let pending = alias.join("out.zip");
+            let resolved = resolve_path(&pending);
+            let canon_real = fs::canonicalize(&real).unwrap();
+            assert_eq!(resolved, canon_real.join("out.zip"));
+            assert_ne!(pending, resolved);
+        }
+        #[cfg(not(unix))]
+        {
+            let pending = real.join("out.zip");
+            let resolved = resolve_path(&pending);
+            let canon_real = fs::canonicalize(&real).unwrap();
+            assert_eq!(resolved, canon_real.join("out.zip"));
+        }
         let _ = fs::remove_dir_all(&root);
     }
 
