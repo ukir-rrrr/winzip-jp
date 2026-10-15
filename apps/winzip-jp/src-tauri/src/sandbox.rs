@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use zipcore::{absolute, atomic_replace, normalize_lexically, path_eq, resolve_path, stays_under};
+use zipcore::{absolute, normalize_lexically, path_eq, resolve_path, stays_under};
 
 const TMP_PREFIX: &str = "winzip-jp-";
 
@@ -236,17 +236,16 @@ pub fn publish_tmp(tmp: &Path, dest: &Path) -> io::Result<()> {
         file.sync_all()?;
         drop(file);
     }
-    match atomic_replace(tmp, dest) {
-        Ok(Some(backup)) => {
-            let _ = fs::remove_file(backup);
-            Ok(())
-        }
-        Ok(None) => Ok(()),
-        Err(e) => {
-            let _ = fs::remove_file(tmp);
-            Err(e)
-        }
+    if fs::rename(tmp, dest).is_ok() {
+        return Ok(());
     }
+    // 別ボリューム。dest だけを上書きし、親に sidecar を作らない。
+    if let Err(e) = fs::copy(tmp, dest) {
+        let _ = fs::remove_file(tmp);
+        return Err(e);
+    }
+    let _ = fs::remove_file(tmp);
+    Ok(())
 }
 
 pub fn discard_tmp(tmp: &Path) {
@@ -340,6 +339,32 @@ mod tests {
             assert!(sandbox.allows(&canon.join(child.file_name().unwrap())));
         }
         let _ = fs::remove_dir_all(&child);
+    }
+
+    #[test]
+    fn publish_tmp_overwrites_dest_without_sidecar() {
+        let root = std::env::temp_dir().join(format!(
+            "winzip-jp-pub-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let dest = root.join("out.zip");
+        fs::write(&dest, b"old").unwrap();
+        let tmp = container_tmp_zip();
+        fs::write(&tmp, b"new").unwrap();
+        publish_tmp(&tmp, &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"new");
+        assert!(!tmp.exists());
+        let leftover: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(leftover, vec!["out.zip".to_string()]);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
