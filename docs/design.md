@@ -311,7 +311,7 @@ UI ライブラリは **Mantine 最新安定版**（導入時点 9.7.x）。`@ma
 | 項目 | 方針 |
 | --- | --- |
 | フォント | システムフォント。`-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif`。Web フォントを取らない |
-| カラー | `MantineProvider` の `defaultColorScheme="auto"` で OS のライト / ダークに追従。アクセントは macOS の `#007AFF` / `#0A84FF` |
+| カラー | `MantineProvider` の `defaultColorScheme="auto"` で OS のライト / ダークに追従。面とアクセントは `theme.ts` の `cssVariablesResolver` が唯一の定義。アクセントは macOS の `#007AFF` / `#0A84FF`（`macos` スケール 5 / 4） |
 | 言語 | 日本語のみ。英語フォールバック文字列をコンポーネントに残さない。`html lang="ja"` |
 | 見た目 | ツールバーとドロップウェル。線や影で区切らず、面のトーン差。ルートに `data-ui` |
 
