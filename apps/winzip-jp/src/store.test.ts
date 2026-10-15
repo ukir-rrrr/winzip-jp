@@ -61,6 +61,26 @@ describe("replacements 契約", () => {
     assert.equal(useAppStore.getState().job, null);
   });
 
+  it("CP932 に無い置換は確定前に作成しない", async () => {
+    installApi({
+      async planArchive() {
+        return S3_PLAN;
+      },
+      async checkNames() {
+        return false;
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().updateReplacement("髙.png", "é.png");
+    await useAppStore.getState().confirmAndCreate();
+    assert.equal(useAppStore.getState().error, COPY.invalidReplacement);
+    assert.equal(useAppStore.getState().sheet, "open");
+    assert.equal(useAppStore.getState().job, null);
+  });
+
   it("絵文字の置換では作成しない", async () => {
     installApi({
       async planArchive() {

@@ -71,6 +71,7 @@ export type ExtractReq = {
 
 export type ZipApi = {
   planArchive: (paths: string[], destNameHint?: string | null) => Promise<PlanDto>;
+  checkNames: (names: string[]) => Promise<boolean>;
   createArchive: (req: CreateReq, dest: string) => Promise<WriteReport>;
   listArchive: (path: string, encoding: NameEncoding | null) => Promise<ListReport>;
   extractArchive: (req: ExtractReq) => Promise<ExtractReport>;

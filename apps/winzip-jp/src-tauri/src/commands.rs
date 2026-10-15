@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Emitter;
 use zipcore::{
-    absolute, extract_zip, inspect_zip_headers, list_zip, normalize_lexically, path_eq, plan_write,
-    stays_under, write_zip, AesMode, ExtractRequest, InputItem, ListRequest, NameEncoding,
-    Progress, WriteRequest, ZipcoreError, EFS_UTF8_BIT,
+    absolute, encode_entry_name, extract_zip, inspect_zip_headers, list_zip, normalize_lexically,
+    path_eq, plan_write, stays_under, write_zip, AesMode, ExtractRequest, InputItem, ListRequest,
+    NameEncoding, Progress, WriteRequest, ZipcoreError, EFS_UTF8_BIT,
 };
 
 use crate::dto::{
@@ -283,6 +283,15 @@ fn admit(
 fn file_path_to_buf(path: tauri_plugin_dialog::FilePath) -> Result<PathBuf, String> {
     path.into_path()
         .map_err(|_| "選んだ場所をパスにできません".to_string())
+}
+
+pub fn names_are_ready(names: &[String]) -> bool {
+    names.iter().all(|name| encode_entry_name(name).issues.is_empty())
+}
+
+#[tauri::command]
+pub fn check_names(names: Vec<String>) -> bool {
+    names_are_ready(&names)
 }
 
 #[tauri::command]

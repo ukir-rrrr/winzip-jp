@@ -80,6 +80,16 @@ const tauriApi: ZipApi = {
       throw jaErr(COPY.failed, err);
     }
   },
+  async checkNames(names) {
+    if (!hasTauri()) {
+      return true;
+    }
+    try {
+      return await invoke<boolean>("check_names", { names });
+    } catch (err) {
+      throw jaErr(COPY.failed, err);
+    }
+  },
   async createArchive(req, dest) {
     if (!hasTauri()) {
       throw new Error(COPY.browserCreate);

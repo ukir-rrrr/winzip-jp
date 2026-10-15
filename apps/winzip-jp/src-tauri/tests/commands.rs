@@ -8,8 +8,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use winzip_jp_lib::{
-    create_archive_direct, extract_archive_direct, list_archive_direct, plan_archive_direct,
-    CreateDto, ExtractDto, Sandbox, PROGRESS_EVENT,
+    create_archive_direct, extract_archive_direct, list_archive_direct, names_are_ready,
+    plan_archive_direct, CreateDto, ExtractDto, Sandbox, PROGRESS_EVENT,
 };
 use zipcore::{
     encode_entry_name, inspect_zip_headers, NameEncoding, Progress, ProgressPhase, EFS_UTF8_BIT,
@@ -127,6 +127,17 @@ fn create_list_extract_with_direct_paths() {
     assert!(dest.exists());
     assert!(!dest.with_extension("zip.partial").exists());
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_names_matches_encode_entry_name_issues() {
+    assert!(names_are_ready(&["高.png".into(), "★.png".into()]));
+    assert!(!names_are_ready(&["é.png".into()]));
+    assert!(!names_are_ready(&["ü.png".into()]));
+    assert!(!names_are_ready(&["😀.png".into()]));
+    assert!(!names_are_ready(&["髙.png".into()]));
+    assert_eq!(encode_entry_name("★.png").issues.len(), 0);
+    assert!(!encode_entry_name("é.png").issues.is_empty());
 }
 
 #[test]

@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { getApi } from "./api";
 import { COPY } from "./copy";
-import { defaultReplacements, replacementIsReady, normalizeReplacements } from "./replacements";
+import {
+  defaultReplacements,
+  normalizeReplacement,
+  normalizeReplacements,
+  replacementIsReady,
+} from "./replacements";
 import type {
   ExtractReport,
   ListReport,
@@ -280,11 +285,26 @@ export const useAppStore = create<AppState>((set, get) => {
 
     updateReplacement(relativePath, suggested) {
       const issues = get().plan?.issues ?? [];
+      const ready = replacementIsReady(suggested, relativePath, issues);
       set({
         replacements: { ...get().replacements, [relativePath]: suggested },
         sheet: "open",
-        error: replacementIsReady(suggested, relativePath, issues) ? "" : COPY.invalidReplacement,
+        error: ready ? "" : COPY.invalidReplacement,
       });
+      if (!ready) {
+        return;
+      }
+      void getApi()
+        .checkNames([normalizeReplacement(suggested)])
+        .then((ok) => {
+          if (get().replacements[relativePath] !== suggested) {
+            return;
+          }
+          if (!ok) {
+            set({ error: COPY.invalidReplacement, sheet: "open" });
+          }
+        })
+        .catch(() => undefined);
     },
 
     dismissSheet() {
@@ -295,8 +315,21 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!get().plan || jobInFlight(get().job)) {
         return;
       }
-      if (!replacementsOk(get().replacements, get().plan?.issues ?? [])) {
+      const issues = get().plan?.issues ?? [];
+      if (!replacementsOk(get().replacements, issues)) {
         set({ error: COPY.invalidReplacement, sheet: "open" });
+        return;
+      }
+      const names = [...new Set(issues.map((issue) => issue.relativePath))].map((path) =>
+        normalizeReplacement(get().replacements[path] ?? ""),
+      );
+      try {
+        if (names.length > 0 && !(await getApi().checkNames(names))) {
+          set({ error: COPY.invalidReplacement, sheet: "open" });
+          return;
+        }
+      } catch (err) {
+        set({ error: errText(err), sheet: "open" });
         return;
       }
       set({ sheet: "none" });
