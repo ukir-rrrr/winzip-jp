@@ -269,6 +269,12 @@ fn replace_grapheme(grapheme: &str) -> GraphemeMap {
     }
 
     if encode_cp932_without_replacement(g).is_ok() {
+        if g != grapheme {
+            return GraphemeMap::Replace {
+                suggested: g.to_string(),
+                kind: UnmappableKind::CompatIdeograph,
+            };
+        }
         return GraphemeMap::Keep {
             text: g.to_string(),
         };
@@ -615,7 +621,10 @@ mod tests {
     fn ideographic_variation_selector_is_stripped() {
         let encoded = encode_entry_name("辻\u{E0100}.txt");
         assert_eq!(hex(&encoded.cp932), "92D22E747874");
-        assert!(encoded.issues.is_empty());
+        assert_eq!(encoded.issues.len(), 1);
+        assert_eq!(encoded.issues[0].original_char, "辻\u{E0100}");
+        assert_eq!(encoded.issues[0].suggested, "辻");
+        assert_eq!(encoded.issues[0].kind, UnmappableKind::CompatIdeograph);
     }
 
     #[test]
