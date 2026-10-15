@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { getApi } from "./api";
 import { COPY } from "./copy";
-import { defaultReplacements, isValidReplacement, normalizeReplacements } from "./replacements";
+import { defaultReplacements, replacementIsReady, normalizeReplacements } from "./replacements";
 import type {
   ExtractReport,
   ListReport,
@@ -9,6 +9,7 @@ import type {
   NameEncoding,
   PlanDto,
   ProgressDto,
+  Unmappable,
   WriteReport,
 } from "./types";
 
@@ -99,8 +100,12 @@ function jobInFlight(job: Job | null): boolean {
   return job !== null && job.progress.phase !== "done";
 }
 
-function replacementsOk(replacements: Record<string, string>): boolean {
-  return Object.values(replacements).every(isValidReplacement);
+function replacementsOk(replacements: Record<string, string>, issues: Unmappable[]): boolean {
+  const paths = new Set(issues.map((issue) => issue.relativePath));
+  if (paths.size === 0) {
+    return Object.values(replacements).every((value) => replacementIsReady(value, "", issues));
+  }
+  return [...paths].every((path) => replacementIsReady(replacements[path] ?? "", path, issues));
 }
 
 const emptyWork = {
@@ -158,8 +163,15 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!live(epoch)) {
         return;
       }
-      const reopen = kind === "create" && (get().plan?.issues.length ?? 0) > 0;
-      set({ error: errText(err), job: null, sheet: reopen ? "open" : get().sheet });
+      const issues = get().plan?.issues ?? [];
+      const reopen = kind === "create" && issues.length > 0;
+      const message = errText(err);
+      const confirmedStillUnmappable = reopen && message === COPY.needConfirm;
+      set({
+        error: confirmedStillUnmappable ? COPY.invalidReplacement : message,
+        job: null,
+        sheet: reopen ? "open" : get().sheet,
+      });
     }
   }
 
@@ -267,10 +279,11 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     updateReplacement(relativePath, suggested) {
+      const issues = get().plan?.issues ?? [];
       set({
         replacements: { ...get().replacements, [relativePath]: suggested },
         sheet: "open",
-        error: isValidReplacement(suggested) ? "" : COPY.invalidReplacement,
+        error: replacementIsReady(suggested, relativePath, issues) ? "" : COPY.invalidReplacement,
       });
     },
 
@@ -282,7 +295,7 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!get().plan || jobInFlight(get().job)) {
         return;
       }
-      if (!replacementsOk(get().replacements)) {
+      if (!replacementsOk(get().replacements, get().plan?.issues ?? [])) {
         set({ error: COPY.invalidReplacement, sheet: "open" });
         return;
       }

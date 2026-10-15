@@ -6,6 +6,7 @@ import {
   normalizeReplacement,
   normalizeReplacements,
   replacementFieldId,
+  replacementIsReady,
   replacementRows,
   suggestedPath,
 } from "./replacements";
@@ -88,6 +89,12 @@ describe("isValidReplacement", () => {
     assert.equal(isValidReplacement("COM10.txt"), true);
   });
 
+  it("rejects zipcore-unmappable replacements such as emoji and 髙", () => {
+    assert.equal(isValidReplacement("😀.png"), false);
+    assert.equal(isValidReplacement("髙.png"), false);
+    assert.equal(isValidReplacement("高.png"), true);
+  });
+
   it("accepts a relative full name", () => {
     assert.equal(isValidReplacement("高.png"), true);
     assert.equal(isValidReplacement("dir/高.png"), true);
@@ -100,6 +107,19 @@ describe("isValidReplacement", () => {
     assert.equal(normalizeReplacement(" 高.png"), "高.png");
     assert.equal(isValidReplacement("高.png "), true);
     assert.deepEqual(normalizeReplacements({ "髙.png": "高.png " }), { "髙.png": "高.png" });
+  });
+});
+
+describe("replacementIsReady", () => {
+  it("rejects a value that still contains the original unmappable char", () => {
+    const ligature: Unmappable = {
+      relativePath: "ﬁ.txt",
+      originalChar: "ﬁ",
+      suggested: "fi",
+      kind: "compatIdeograph",
+    };
+    assert.equal(replacementIsReady("ﬁ.txt", "ﬁ.txt", [ligature]), false);
+    assert.equal(replacementIsReady("fi.txt", "ﬁ.txt", [ligature]), true);
   });
 });
 

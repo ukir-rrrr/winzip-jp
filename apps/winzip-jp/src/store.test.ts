@@ -60,6 +60,23 @@ describe("replacements 契約", () => {
     assert.equal(useAppStore.getState().sheet, "open");
     assert.equal(useAppStore.getState().job, null);
   });
+
+  it("絵文字の置換では作成しない", async () => {
+    installApi({
+      async planArchive() {
+        return S3_PLAN;
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().updateReplacement("髙.png", "😀.png");
+    assert.equal(useAppStore.getState().error, COPY.invalidReplacement);
+    await useAppStore.getState().confirmAndCreate();
+    assert.equal(useAppStore.getState().sheet, "open");
+    assert.equal(useAppStore.getState().job, null);
+  });
 });
 
 describe("シートのやめる", () => {
@@ -172,14 +189,15 @@ describe("世代トークン", () => {
         return "/tmp/e2e/送り.zip";
       },
       async createArchive() {
-        throw new Error("置き換えを確定してください");
+        throw new Error(COPY.needConfirm);
       },
     });
     await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
     await useAppStore.getState().confirmAndCreate();
     assert.equal(useAppStore.getState().sheet, "open");
     assert.equal(useAppStore.getState().job, null);
-    assert.match(useAppStore.getState().error, /置き換え/);
+    assert.equal(useAppStore.getState().error, COPY.invalidReplacement);
+    assert.notEqual(useAppStore.getState().error, COPY.needConfirm);
   });
 
   it("取り込み開始で古い plan を消す", async () => {
