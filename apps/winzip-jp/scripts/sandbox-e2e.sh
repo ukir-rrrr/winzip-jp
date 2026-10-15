@@ -69,6 +69,10 @@ if ! grep -q 'com.apple.security.app-sandbox' "$ARTIFACTS/signed-entitlements.xm
   echo "app-sandbox が署名にありません" >&2
   exit 1
 fi
+if ! grep -q 'com.apple.security.network.client' "$ARTIFACTS/signed-entitlements.xml"; then
+  echo "network.client が署名にありません（WKWebView が白画面になる）" >&2
+  exit 1
+fi
 
 BIN="$APP/Contents/MacOS/winzip-jp"
 if [[ ! -x "$BIN" ]]; then
@@ -121,4 +125,85 @@ if [[ ! -s "$ARTIFACTS/s1-sandbox.png" ]]; then
   echo "s1-sandbox.png が空です" >&2
   exit 1
 fi
+# ウィンドウ内（メニューバー・Dock を除く中央）がほぼ白なら WebView 未描画。
+python3 - "$ARTIFACTS/s1-sandbox.png" <<'PY'
+import struct, sys, zlib
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+if data[:8] != b"\x89PNG\r\n\x1a\n":
+    raise SystemExit("s1-sandbox.png が PNG ではありません")
+pos = 8
+width = height = bit_depth = color_type = None
+idat = bytearray()
+while pos + 8 <= len(data):
+    ln = struct.unpack(">I", data[pos : pos + 4])[0]
+    typ = data[pos + 4 : pos + 8]
+    chunk = data[pos + 8 : pos + 8 + ln]
+    pos += 12 + ln
+    if typ == b"IHDR":
+        width, height, bit_depth, color_type = struct.unpack(">IIBB", chunk[:10])
+    elif typ == b"IDAT":
+        idat += chunk
+    elif typ == b"IEND":
+        break
+if width is None or bit_depth != 8 or color_type not in (2, 6):
+    raise SystemExit(f"未対応の PNG: {width}x{height} depth={bit_depth} type={color_type}")
+raw = zlib.decompress(bytes(idat))
+bpp = 4 if color_type == 6 else 3
+stride = width * bpp
+
+def paeth(a, b, c):
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    if pa <= pb and pa <= pc:
+        return a
+    if pb <= pc:
+        return b
+    return c
+
+rows = []
+i = 0
+prev = bytearray(stride)
+for _ in range(height):
+    f = raw[i]
+    i += 1
+    row = bytearray(raw[i : i + stride])
+    i += stride
+    if f == 1:
+        for x in range(stride):
+            row[x] = (row[x] + (row[x - bpp] if x >= bpp else 0)) & 255
+    elif f == 2:
+        for x in range(stride):
+            row[x] = (row[x] + prev[x]) & 255
+    elif f == 3:
+        for x in range(stride):
+            a = row[x - bpp] if x >= bpp else 0
+            row[x] = (row[x] + ((a + prev[x]) // 2)) & 255
+    elif f == 4:
+        for x in range(stride):
+            a = row[x - bpp] if x >= bpp else 0
+            c = prev[x - bpp] if x >= bpp else 0
+            row[x] = (row[x] + paeth(a, prev[x], c)) & 255
+    elif f != 0:
+        raise SystemExit(f"png filter {f}")
+    rows.append(row)
+    prev = row
+
+x0, x1 = int(width * 0.15), int(width * 0.85)
+y0, y1 = int(height * 0.14), int(height * 0.72)
+nonwhite = total = 0
+for y in range(y0, y1):
+    row = rows[y]
+    for x in range(x0, x1):
+        r, g, b = row[x * bpp], row[x * bpp + 1], row[x * bpp + 2]
+        total += 1
+        if r < 245 or g < 245 or b < 245:
+            nonwhite += 1
+ratio = nonwhite / total if total else 0
+print(f"s1 nonwhite={nonwhite}/{total} ({ratio:.3f})")
+if ratio < 0.02:
+    raise SystemExit("s1-sandbox.png の WebView が白画面のままです")
+PY
 echo "wrote $ARTIFACTS/s1-sandbox.png"

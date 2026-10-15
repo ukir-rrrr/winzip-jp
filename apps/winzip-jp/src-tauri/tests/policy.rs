@@ -54,6 +54,10 @@ fn appstore_entitlements_match_design_section_4_1() {
                 "true".into()
             ),
             (
+                "com.apple.security.network.client".into(),
+                "true".into()
+            ),
+            (
                 "com.apple.application-identifier".into(),
                 "$TEAM_ID.jp.riku.winzip".into()
             ),
@@ -65,7 +69,6 @@ fn appstore_entitlements_match_design_section_4_1() {
     );
     for banned in [
         "downloads.read-write",
-        "network.client",
         "network.server",
         "temporary-exception.files.home-relative-path",
         "files.user-selected.read-only",
