@@ -192,7 +192,10 @@ fn write_plan_to_path(
     let result = write_plan_to_partial(plan, dest, &partial, progress, cancel);
     match result {
         Ok(report) => {
-            replace_file(&partial, dest)?;
+            if let Err(e) = replace_file(&partial, dest) {
+                let _ = fs::remove_file(&partial);
+                return Err(e.into());
+            }
             Ok(report)
         }
         Err(e) => {
@@ -657,20 +660,34 @@ fn partial_path(dest: &Path) -> PathBuf {
 }
 
 fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
-    match fs::rename(from, to) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            if to.exists() {
-                fs::remove_file(to)?;
-            }
-            match fs::rename(from, to) {
-                Ok(()) => Ok(()),
-                Err(_) => {
-                    fs::copy(from, to)?;
-                    fs::remove_file(from)?;
-                    Ok(())
-                }
-            }
+    if fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    if !to.exists() {
+        fs::copy(from, to)?;
+        let _ = fs::remove_file(from);
+        return Ok(());
+    }
+    // Windows など rename が既存 dest を置換できない場合。dest は消さず退避する。
+    let backup = {
+        let mut name = to.as_os_str().to_os_string();
+        name.push(".bak");
+        PathBuf::from(name)
+    };
+    fs::rename(to, &backup)?;
+    let placed = fs::rename(from, to).or_else(|_| {
+        fs::copy(from, to)?;
+        fs::remove_file(from)?;
+        Ok(())
+    });
+    match placed {
+        Ok(()) => {
+            let _ = fs::remove_file(&backup);
+            Ok(())
+        }
+        Err(e) => {
+            let _ = fs::rename(&backup, to);
+            Err(e)
         }
     }
 }

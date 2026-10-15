@@ -357,6 +357,31 @@ mod tests {
         assert_eq!((time, date), (want_time, want_date));
     }
 
+    /// TZ=UTC の CI でも UTC 実装への退行を検出する。POSIX `JST-9` は tzdata 不要。
+    #[cfg(unix)]
+    #[test]
+    fn dos_time_jst_fixed_not_utc() {
+        const INSTANT: u64 = 1_700_000_000; // 2023-11-14 22:13:20 UTC = 11-15 07:13:20 JST
+        if std::env::var_os("ZIPCORE_DOS_TZ_CHILD").is_some() {
+            let ts = UNIX_EPOCH + std::time::Duration::from_secs(INSTANT);
+            let got = msdos_datetime(ts);
+            assert_eq!(got, pack_msdos(2023, 11, 15, 7, 13, 20));
+            assert_ne!(got, pack_msdos(2023, 11, 14, 22, 13, 20));
+            return;
+        }
+        let exe = std::env::current_exe().expect("test exe");
+        let status = std::process::Command::new(exe)
+            .env("TZ", "JST-9")
+            .env("ZIPCORE_DOS_TZ_CHILD", "1")
+            .args(["pkzip::tests::dos_time_jst_fixed_not_utc", "--exact"])
+            .status()
+            .expect("spawn TZ child");
+        assert!(
+            status.success(),
+            "JST 固定値テストの子プロセスが失敗: {status}"
+        );
+    }
+
     #[test]
     fn extra_has_id_detects_7075() {
         let mut extra = Vec::new();
