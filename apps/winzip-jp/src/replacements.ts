@@ -35,6 +35,36 @@ export function normalizeReplacements(map: Record<string, string>): Record<strin
 
 const WIN_FORBIDDEN = /[:*?"<>|\x00-\x1f]/;
 
+const WIN_RESERVED = new Set([
+  "CON",
+  "PRN",
+  "AUX",
+  "NUL",
+  "COM1",
+  "COM2",
+  "COM3",
+  "COM4",
+  "COM5",
+  "COM6",
+  "COM7",
+  "COM8",
+  "COM9",
+  "LPT1",
+  "LPT2",
+  "LPT3",
+  "LPT4",
+  "LPT5",
+  "LPT6",
+  "LPT7",
+  "LPT8",
+  "LPT9",
+]);
+
+function isReservedDosName(part: string): boolean {
+  const stem = part.split(".")[0] ?? part;
+  return WIN_RESERVED.has(stem.toUpperCase());
+}
+
 export function isValidReplacement(value: string): boolean {
   const trimmed = normalizeReplacement(value);
   if (!trimmed || trimmed.includes("\\") || WIN_FORBIDDEN.test(trimmed)) {
@@ -49,7 +79,7 @@ export function isValidReplacement(value: string): boolean {
     if (!part || part === "." || part === "..") {
       return false;
     }
-    if (WIN_FORBIDDEN.test(part)) {
+    if (WIN_FORBIDDEN.test(part) || isReservedDosName(part)) {
       return false;
     }
     return !part.endsWith(".") && !part.endsWith(" ");

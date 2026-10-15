@@ -77,6 +77,17 @@ describe("isValidReplacement", () => {
     assert.equal(isValidReplacement("高.png."), false);
   });
 
+  it("rejects Windows reserved device names, even with an extension", () => {
+    assert.equal(isValidReplacement("CON.png"), false);
+    assert.equal(isValidReplacement("con.png"), false);
+    assert.equal(isValidReplacement("NUL"), false);
+    assert.equal(isValidReplacement("COM1.txt"), false);
+    assert.equal(isValidReplacement("LPT9.doc"), false);
+    assert.equal(isValidReplacement("dir/CON.png"), false);
+    assert.equal(isValidReplacement("CONSOLE.png"), true);
+    assert.equal(isValidReplacement("COM10.txt"), true);
+  });
+
   it("accepts a relative full name", () => {
     assert.equal(isValidReplacement("高.png"), true);
     assert.equal(isValidReplacement("dir/高.png"), true);
