@@ -214,7 +214,11 @@ export const useAppStore = create<AppState>((set, get) => {
     if (!Number.isInteger(mb) || mb <= 0) {
       return "invalid";
     }
-    return splitMbToBytes(mb);
+    const bytes = splitMbToBytes(mb);
+    if (!Number.isSafeInteger(bytes) || bytes <= 0) {
+      return "invalid";
+    }
+    return bytes;
   }
 
   function startCreate(replacements: Record<string, string>): Promise<void> {

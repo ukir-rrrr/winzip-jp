@@ -564,6 +564,24 @@ describe("分割オプション", () => {
     assert.equal(useAppStore.getState().error, COPY.splitCustomInvalid);
     assert.equal(useAppStore.getState().job, null);
   });
+
+  it("任意サイズが Infinity になる値なら作成しない", async () => {
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setSplitEnabled(true);
+    useAppStore.getState().setSplitPresetMb("custom");
+    useAppStore.getState().setSplitCustomMb("1e308");
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().error, COPY.splitCustomInvalid);
+    assert.equal(useAppStore.getState().job, null);
+  });
 });
 
 describe("展開エラー文言", () => {
