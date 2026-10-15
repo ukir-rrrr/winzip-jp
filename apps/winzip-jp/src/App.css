@@ -37,8 +37,15 @@ body,
   line-height: 1.2;
 }
 
-[data-ui] .aes-switch {
+[data-ui] .opt-switches {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: 12px;
+}
+
+[data-ui] .aes-switch,
+[data-ui] .split-switch {
   padding: 5px 10px;
   border-radius: 8px;
   color: var(--app-ink);
@@ -52,16 +59,20 @@ body,
 }
 
 [data-ui] .aes-switch:hover,
-[data-ui] .aes-switch.is-on {
+[data-ui] .aes-switch.is-on,
+[data-ui] .split-switch:hover,
+[data-ui] .split-switch.is-on {
   opacity: 1;
 }
 
-[data-ui] .aes-switch.is-on {
+[data-ui] .aes-switch.is-on,
+[data-ui] .split-switch.is-on {
   background: var(--app-tab);
   color: var(--app-accent);
 }
 
-[data-ui] .aes-switch:focus-visible {
+[data-ui] .aes-switch:focus-visible,
+[data-ui] .split-switch:focus-visible {
   outline: 2px solid var(--app-accent);
   outline-offset: 2px;
 }
@@ -286,12 +297,19 @@ body,
   line-height: 1.5;
 }
 
-[data-ui] .aes-banner {
+[data-ui] .option-banners {
   position: absolute;
   left: 22px;
   right: 22px;
   top: 22px;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+[data-ui] .aes-banner,
+[data-ui] .split-banner {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -448,6 +466,7 @@ body,
 @media (prefers-reduced-motion: reduce) {
   [data-ui] .mode-tab,
   [data-ui] .aes-switch,
+  [data-ui] .split-switch,
   [data-ui] .cmd-btn {
     transition: none;
   }

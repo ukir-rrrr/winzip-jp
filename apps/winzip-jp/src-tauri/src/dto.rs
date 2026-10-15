@@ -12,6 +12,8 @@ pub struct CreateDto {
     pub replacements: BTreeMap<String, String>,
     #[serde(default)]
     pub password: Option<String>,
+    #[serde(default)]
+    pub split_bytes: Option<u64>,
 }
 
 impl std::fmt::Debug for CreateDto {
@@ -20,6 +22,7 @@ impl std::fmt::Debug for CreateDto {
             .field("paths", &self.paths)
             .field("replacements", &self.replacements)
             .field("password", &self.password.as_ref().map(|_| "***"))
+            .field("split_bytes", &self.split_bytes)
             .finish()
     }
 }
@@ -232,6 +235,7 @@ mod tests {
             paths: vec!["/tmp/a".into()],
             replacements: Default::default(),
             password: Some("hunter2".into()),
+            split_bytes: None,
         };
         let text = format!("{dto:?}");
         assert!(text.contains("***"));

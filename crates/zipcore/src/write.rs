@@ -1,4 +1,5 @@
-//! ZIP 作成（任意 AES-256 AE-2、非分割）。ファイル名は `encode_entry_name` の CP932 バイトのみ。
+//! ZIP 作成（任意 AES-256 AE-2、任意分割）。ファイル名は `encode_entry_name` の CP932 バイトのみ。
+//! 分割は出力ストリームの差し替えだけ。非分割パスのヘッダ契約は変えない。
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
@@ -19,9 +20,10 @@ use crate::error::ZipcoreError;
 use crate::fsutil::{atomic_replace, path_eq, resolve_existing, resolve_path, stays_under};
 use crate::job::check_cancel;
 use crate::pkzip::{
-    inspect_zip, patch_local_sizes, write_central_header, write_eocd, write_local_header,
-    CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED, VERSION_NEEDED,
+    inspect_reader, inspect_zip, patch_local_sizes, write_central_header, write_eocd,
+    write_local_header, CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED, VERSION_NEEDED,
 };
+use crate::split::{self, SplitWriter};
 
 pub use crate::job::{Progress, ProgressPhase, SecretString};
 pub use crate::pkzip::InspectedEntry;
@@ -81,7 +83,13 @@ pub struct WriteReport {
 }
 
 pub fn inspect_zip_headers(path: &Path) -> Result<Vec<InspectedEntry>, ZipcoreError> {
-    inspect_zip(path)
+    let volumes = split::discover_volumes(path);
+    if volumes.len() <= 1 {
+        inspect_zip(path)
+    } else {
+        let mut reader = split::ConcatReader::open(&volumes)?;
+        inspect_reader(&mut reader)
+    }
 }
 
 pub fn plan_write(req: &WriteRequest) -> Result<Plan, ZipcoreError> {
@@ -117,8 +125,10 @@ pub fn write_zip(
         }
     }
     let _ = req.aes;
-    if req.split_bytes.is_some() {
-        return Err(ZipcoreError::SplitNotImplemented);
+    if let Some(0) = req.split_bytes {
+        return Err(ZipcoreError::InvalidSplit {
+            reason: "0 バイトには分割できません".into(),
+        });
     }
 
     let plan = plan_write(&req)?;
@@ -143,7 +153,14 @@ pub fn write_zip(
 
     let dest = req.dest.clone();
     let password = req.password.as_ref().map(SecretString::expose_bytes);
-    let report = write_plan_to_path(&plan, &dest, password, &mut progress, cancel)?;
+    let report = write_plan_to_path(
+        &plan,
+        &dest,
+        password,
+        req.split_bytes,
+        &mut progress,
+        cancel,
+    )?;
     progress(Progress {
         phase: ProgressPhase::Done,
         current_entry: None,
@@ -159,9 +176,13 @@ fn write_plan_to_path(
     plan: &Plan,
     dest: &Path,
     password: Option<&[u8]>,
+    split_bytes: Option<u64>,
     progress: &mut impl FnMut(Progress),
     cancel: &AtomicBool,
 ) -> Result<WriteReport, ZipcoreError> {
+    if let Some(n) = split_bytes {
+        return write_plan_split(plan, dest, password, n, progress, cancel);
+    }
     let partial = partial_path(dest);
     let result = write_plan_to_partial(plan, dest, &partial, password, progress, cancel);
     match result {
@@ -179,6 +200,34 @@ fn write_plan_to_path(
     }
 }
 
+fn write_plan_split(
+    plan: &Plan,
+    dest: &Path,
+    password: Option<&[u8]>,
+    split_bytes: u64,
+    progress: &mut impl FnMut(Progress),
+    cancel: &AtomicBool,
+) -> Result<WriteReport, ZipcoreError> {
+    let mut out = SplitWriter::create(dest.to_path_buf(), split_bytes)?;
+    match write_plan_into(&mut out, plan, dest, password, progress, cancel) {
+        Ok(report) => {
+            out.finish()?;
+            Ok(report)
+        }
+        Err(e) => {
+            out.abort();
+            Err(map_split_write_err(e))
+        }
+    }
+}
+
+fn map_split_write_err(err: ZipcoreError) -> ZipcoreError {
+    match err {
+        ZipcoreError::Io(io) => split::map_split_io(io),
+        other => other,
+    }
+}
+
 fn write_plan_to_partial(
     plan: &Plan,
     dest: &Path,
@@ -188,6 +237,19 @@ fn write_plan_to_partial(
     cancel: &AtomicBool,
 ) -> Result<WriteReport, ZipcoreError> {
     let mut out = File::create(partial)?;
+    let report = write_plan_into(&mut out, plan, dest, password, progress, cancel)?;
+    out.sync_all()?;
+    Ok(report)
+}
+
+fn write_plan_into<W: Write + Seek>(
+    out: &mut W,
+    plan: &Plan,
+    dest: &Path,
+    password: Option<&[u8]>,
+    progress: &mut impl FnMut(Progress),
+    cancel: &AtomicBool,
+) -> Result<WriteReport, ZipcoreError> {
     let mut centrals = Vec::with_capacity(plan.entries.len());
     let mut entries_done = 0u32;
     let mut bytes_done = 0u64;
@@ -205,7 +267,7 @@ fn write_plan_to_partial(
             bytes_total,
         });
         let rec = write_one_entry(
-            &mut out,
+            out,
             entry,
             password,
             cancel,
@@ -240,7 +302,7 @@ fn write_plan_to_partial(
         });
     }
     for rec in &centrals {
-        write_central_header(&mut out, rec)?;
+        write_central_header(out, rec)?;
     }
     let cd_end = out.stream_position()?;
     let cd_size = cd_end - cd_offset;
@@ -249,13 +311,7 @@ fn write_plan_to_partial(
             reason: "中央ディレクトリが 4 GiB を超えています".into(),
         });
     }
-    write_eocd(
-        &mut out,
-        centrals.len() as u16,
-        cd_size as u32,
-        cd_offset as u32,
-    )?;
-    out.sync_all()?;
+    write_eocd(out, centrals.len() as u16, cd_size as u32, cd_offset as u32)?;
 
     Ok(WriteReport {
         dest: dest.to_path_buf(),
@@ -265,8 +321,8 @@ fn write_plan_to_partial(
     })
 }
 
-fn write_one_entry(
-    out: &mut File,
+fn write_one_entry<W: Write + Seek>(
+    out: &mut W,
     entry: &PlannedEntry,
     password: Option<&[u8]>,
     cancel: &AtomicBool,

@@ -540,6 +540,7 @@ fn create_with_password_sets_aes_flags() {
             paths: vec![src.to_string_lossy().into_owned()],
             replacements: Default::default(),
             password: Some("secret".into()),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -571,6 +572,7 @@ fn create_rejects_empty_password() {
             paths: vec![src.to_string_lossy().into_owned()],
             replacements: Default::default(),
             password: Some(String::new()),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -579,5 +581,42 @@ fn create_rejects_empty_password() {
     .unwrap_err();
     assert!(err.contains("パスワードを入力"), "{err}");
     assert!(!dest.exists());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn create_split_writes_z01_and_zip_with_cp932_names() {
+    let root = unique_dir("split");
+    let src = root.join("が.txt");
+    let payload: Vec<u8> = (0..4000).map(|i| (i.wrapping_mul(37) + 9) as u8).collect();
+    fs::write(&src, &payload).unwrap();
+    let dest = root.join("out.zip");
+    let mut sandbox = Sandbox::new();
+    sandbox.grant(&src);
+    sandbox.grant_save_dest(&dest);
+    create_archive_direct(
+        &sandbox,
+        CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+            split_bytes: Some(512),
+            ..Default::default()
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .expect("split create");
+    let z01 = dest.with_file_name("out.z01");
+    assert!(z01.exists(), "z01 piece");
+    assert!(dest.exists(), "last zip piece");
+    assert!(fs::metadata(&z01).unwrap().len() <= 512);
+    let headers = inspect_zip_headers(&dest).unwrap();
+    let file = headers
+        .iter()
+        .find(|e| e.name_raw.ends_with(b".txt"))
+        .unwrap();
+    assert_eq!(hex(&file.name_raw), "82AA2E747874");
+    assert_eq!(file.gpbf & EFS_UTF8_BIT, 0);
     let _ = fs::remove_dir_all(&root);
 }

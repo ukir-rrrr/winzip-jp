@@ -1,0 +1,18 @@
+{
+  "replacements": {},
+  "excluded": [],
+  "entries": [
+    {
+      "name_nfc": "blob.bin",
+      "name_hex": "626C6F622E62696E",
+      "gpbf": 0,
+      "method": 8
+    },
+    {
+      "name_nfc": "が.txt",
+      "name_hex": "82AA2E747874",
+      "gpbf": 0,
+      "method": 8
+    }
+  ]
+}

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use zipcore::split::{self, is_split_sibling};
 use zipcore::{absolute, normalize_lexically, path_eq, resolve_path, stays_under};
 
 const TMP_PREFIX: &str = "winzip-jp-";
@@ -181,6 +182,13 @@ impl Sandbox {
         if self.grants.iter().any(|g| g.path == resolved) {
             return Ok(resolved);
         }
+        if self
+            .grants
+            .iter()
+            .any(|g| !g.recursive && is_split_sibling(&g.path, &resolved))
+        {
+            return Ok(resolved);
+        }
         Err(format!(
             "この場所にはアクセスできません: {}",
             resolved.display()
@@ -252,6 +260,31 @@ pub fn is_container_tmp(path: &Path) -> bool {
     }
     let name = abs.file_name().and_then(|n| n.to_str()).unwrap_or_default();
     name.starts_with(TMP_PREFIX)
+}
+
+/// コンテナの分割ピースを、同じ stem の最終パスへ順に公開する。
+pub fn publish_tmp_set(tmp_vols: &[PathBuf], dest_vols: &[PathBuf]) -> Result<(), PublishError> {
+    if tmp_vols.len() != dest_vols.len() || tmp_vols.is_empty() {
+        return Err(
+            io::Error::new(io::ErrorKind::InvalidInput, "分割ピースの数が合いません").into(),
+        );
+    }
+    let mut placed: Vec<PathBuf> = Vec::new();
+    for (tmp, dest) in tmp_vols.iter().zip(dest_vols.iter()) {
+        match publish_tmp(tmp, dest) {
+            Ok(()) => placed.push(dest.clone()),
+            Err(e) => {
+                for p in &placed {
+                    let _ = fs::remove_file(p);
+                }
+                for t in tmp_vols {
+                    discard_tmp(t);
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// コンテナ tmp を fsync してからユーザー先へ rename（別ボリュームは copy+remove）。
@@ -362,6 +395,14 @@ fn restore_or_keep_backup(bak: &Path, dest: &Path) -> bool {
 }
 
 pub fn discard_tmp(tmp: &Path) {
+    let volumes = split::discover_volumes(tmp);
+    for p in &volumes {
+        let _ = fs::remove_file(p);
+        let mut partial = p.as_os_str().to_os_string();
+        partial.push(".partial");
+        let _ = fs::remove_file(partial);
+    }
+    split::discard_partials_for(tmp);
     let _ = fs::remove_file(tmp);
     let mut partial = tmp.as_os_str().to_os_string();
     partial.push(".partial");
@@ -614,12 +655,7 @@ mod tests {
             &tmp,
             &dest,
             |src, dst| fs::copy(src, dst).map(|_| ()),
-            |_| {
-                Err(io::Error::new(
-                    io::ErrorKind::StorageFull,
-                    "persist failed",
-                ))
-            },
+            |_| Err(io::Error::new(io::ErrorKind::StorageFull, "persist failed")),
         );
         assert!(err.is_err());
         assert!(!dest.exists());
@@ -649,6 +685,9 @@ mod tests {
         assert!(sandbox.resolve_save_file(&other_case).is_err());
         assert!(!sandbox.allows(&sibling));
         assert!(!sandbox.allows(&root));
+        let z01 = root.join("out.z01");
+        assert!(sandbox.resolve_save_file(&z01).is_ok());
+        assert!(!sandbox.allows(&z01));
         let _ = fs::remove_dir_all(&root);
     }
 

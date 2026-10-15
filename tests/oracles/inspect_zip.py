@@ -164,12 +164,31 @@ def compare(entries: list[dict], expected: dict) -> list[str]:
     return errors
 
 
+def read_zip_bytes(path: Path) -> bytes:
+    """WinZip 分割 (stem.z01 … stem.zip) なら連結してから検査する。"""
+    first = path.with_name(path.stem + ".z01")
+    if not first.is_file():
+        return path.read_bytes()
+    chunks: list[bytes] = []
+    i = 1
+    while True:
+        piece = path.with_name(path.stem + f".z{i:02d}")
+        if not piece.is_file():
+            break
+        chunks.append(piece.read_bytes())
+        i += 1
+        if i > 999:
+            break
+    chunks.append(path.read_bytes())
+    return b"".join(chunks)
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="Inspect ZIP name_raw / gpbf")
     p.add_argument("zip_path")
     p.add_argument("--expect", help="tests/golden/*/expected.json")
     args = p.parse_args(argv)
-    data = Path(args.zip_path).read_bytes()
+    data = read_zip_bytes(Path(args.zip_path))
     entries = inspect(data)
     if args.expect:
         expected = json.loads(Path(args.expect).read_text(encoding="utf-8"))

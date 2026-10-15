@@ -391,7 +391,7 @@ fn empty_password_is_rejected() {
 }
 
 #[test]
-fn split_is_still_rejected() {
+fn zero_split_bytes_is_rejected() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("a.txt");
     write_file(&src, b"a");
@@ -403,13 +403,11 @@ fn split_is_still_rejected() {
         dest: tmp.path().join("out.zip"),
         password: None,
         aes: AesMode::Aes256,
-        split_bytes: Some(1024),
+        split_bytes: Some(0),
         replacements: BTreeMap::new(),
     };
-    assert!(matches!(
-        write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_err(),
-        ZipcoreError::SplitNotImplemented
-    ));
+    let err = write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_err();
+    assert!(matches!(err, ZipcoreError::InvalidSplit { .. }));
 }
 
 #[test]
@@ -732,4 +730,171 @@ fn secret_string_debug_redacts() {
     let s = SecretString::new("hunter2");
     assert_eq!(s.expose(), "hunter2");
     assert!(!format!("{s:?}").contains("hunter2"));
+}
+
+fn incompressible(n: usize) -> Vec<u8> {
+    (0..n).map(|i| (i.wrapping_mul(167) + 13) as u8).collect()
+}
+
+#[test]
+fn split_pieces_stay_within_limit_and_cd_ends_on_zip() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("が.txt"), &incompressible(2400));
+    write_file(&src.join("blob.bin"), &incompressible(1800));
+    let dest = tmp.path().join("out.zip");
+    let split_bytes = 512u64;
+    let req = WriteRequest {
+        inputs: vec![
+            InputItem {
+                abs_path: src.join("が.txt"),
+                as_dir: false,
+            },
+            InputItem {
+                abs_path: src.join("blob.bin"),
+                as_dir: false,
+            },
+        ],
+        dest: dest.clone(),
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: Some(split_bytes),
+        replacements: BTreeMap::new(),
+    };
+    write_zip(req, |_| {}, &AtomicBool::new(false)).expect("split write");
+    let volumes = zipcore::discover_volumes(&dest);
+    assert!(
+        volumes.len() >= 2,
+        "expected multiple pieces, got {}",
+        volumes.len()
+    );
+    assert!(volumes[0].ends_with("out.z01"));
+    assert_eq!(volumes.last().unwrap(), &dest);
+    let sizes = zipcore::split::piece_sizes(&dest).unwrap();
+    for (i, size) in sizes.iter().enumerate() {
+        if i + 1 < sizes.len() {
+            assert!(*size <= split_bytes, "piece {i} is {size} > {split_bytes}");
+        }
+    }
+    assert!(zipcore::split::eocd_in_last_volume(&dest).unwrap());
+    assert_invariants(&dest, &[("が.txt", false), ("blob.bin", false)]);
+    let entries = inspect_zip_headers(&dest).unwrap();
+    let ga = entries
+        .iter()
+        .find(|e| e.name_raw == encode_entry_name("が.txt").cp932)
+        .unwrap();
+    assert_eq!(hex(&ga.name_raw), "82AA2E747874");
+    assert_eq!(ga.gpbf & EFS_UTF8_BIT, 0);
+}
+
+#[test]
+fn split_smaller_than_limit_is_single_zip() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("a.txt"), b"tiny");
+    let dest = tmp.path().join("out.zip");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src.join("a.txt"),
+            as_dir: false,
+        }],
+        dest: dest.clone(),
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: Some(1024 * 1024),
+        replacements: BTreeMap::new(),
+    };
+    write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap();
+    assert!(dest.exists());
+    assert!(!dest.with_file_name("out.z01").exists());
+    assert_invariants(&dest, &[("a.txt", false)]);
+}
+
+#[test]
+fn split_cancel_deletes_every_piece() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("a.bin"), &incompressible(80 * 1024));
+    write_file(&src.join("b.bin"), &incompressible(80 * 1024));
+    let dest = tmp.path().join("out.zip");
+    fs::write(&dest, b"EXISTING").unwrap();
+    let z01 = dest.with_file_name("out.z01");
+    fs::write(&z01, b"OLDZ01").unwrap();
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src,
+            as_dir: true,
+        }],
+        dest: dest.clone(),
+        password: None,
+        aes: AesMode::Aes256,
+        split_bytes: Some(1024),
+        replacements: BTreeMap::new(),
+    };
+    let cancel = AtomicBool::new(false);
+    let err = write_zip(
+        req,
+        |p| {
+            if p.phase == ProgressPhase::Writing {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        },
+        &cancel,
+    )
+    .unwrap_err();
+    assert!(matches!(err, ZipcoreError::Cancelled));
+    assert_eq!(fs::read(&dest).unwrap(), b"EXISTING");
+    assert_eq!(fs::read(&z01).unwrap(), b"OLDZ01");
+    for i in 1..=20u32 {
+        let mut name = dest.file_stem().unwrap().to_os_string();
+        name.push(format!(".z{i:02}.partial"));
+        let partial = dest.parent().unwrap().join(name);
+        assert!(!partial.exists(), "leftover {}", partial.display());
+    }
+}
+
+#[test]
+fn split_with_password_keeps_cp932_and_encrypt_bit() {
+    let tmp = support::TempDir::new();
+    let src = tmp.path().join("src");
+    write_file(&src.join("が.txt"), &incompressible(2000));
+    let dest = tmp.path().join("out.zip");
+    let req = WriteRequest {
+        inputs: vec![InputItem {
+            abs_path: src.join("が.txt"),
+            as_dir: false,
+        }],
+        dest: dest.clone(),
+        password: Some(SecretString::new("secret")),
+        aes: AesMode::Aes256,
+        split_bytes: Some(400),
+        replacements: BTreeMap::new(),
+    };
+    write_zip(req, |_| {}, &AtomicBool::new(false)).expect("split+aes");
+    let volumes = zipcore::discover_volumes(&dest);
+    assert!(volumes.len() >= 2);
+    let entries = inspect_zip_headers(&dest).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name_raw, encode_entry_name("が.txt").cp932);
+    assert_eq!(entries[0].gpbf & EFS_UTF8_BIT, 0);
+    assert_eq!(entries[0].gpbf & 1, 1);
+    assert!(entries[0].has_aes_extra());
+    let joined = tmp.path().join("joined.zip");
+    zipcore::join_volumes_to(&dest, &joined).unwrap();
+    zipcore::extract_zip(
+        zipcore::ExtractRequest {
+            archive: joined,
+            dest: tmp.path().join("out"),
+            encoding: None,
+            overwrite: false,
+            password: Some(SecretString::new("secret")),
+        },
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .expect("decrypt split aes");
+    assert_eq!(
+        fs::read(tmp.path().join("out").join("が.txt")).unwrap(),
+        incompressible(2000)
+    );
 }

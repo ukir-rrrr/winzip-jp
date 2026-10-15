@@ -57,10 +57,21 @@ export type ExtractReport = {
   bytesWritten: number;
 };
 
+export type SplitPresetMb = 8 | 10 | 25 | 100;
+
+export const SPLIT_PRESET_MB: readonly SplitPresetMb[] = [8, 10, 25, 100];
+
+export const DEFAULT_SPLIT_MB: SplitPresetMb = 10;
+
+export function splitMbToBytes(mb: number): number {
+  return mb * 1024 * 1024;
+}
+
 export type CreateReq = {
   paths: string[];
   replacements: Record<string, string>;
   password?: string | null;
+  splitBytes?: number | null;
 };
 
 export type ExtractReq = {
