@@ -143,6 +143,8 @@ fn last_zip_this_disk(zip_path: &Path) -> Option<u16> {
 }
 
 /// 今回のセットに含まれない `dest.zNN` を消す。キャンセルでは呼ばない。
+/// `{stem}.zNN` は別アーカイブではなく、その `{stem}.zip` の分割ピース。
+/// 保存先の上書きはセット全体の置き換えなので、確認ダイアログは挟まない。
 pub fn discard_stale_volumes(dest: &Path, keep_count: u32) -> io::Result<()> {
     let keep = final_volume_paths(dest, keep_count.max(1));
     for i in 1..=MAX_PIECES {

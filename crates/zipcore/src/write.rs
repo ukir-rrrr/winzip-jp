@@ -191,7 +191,7 @@ fn write_plan_to_path(
                 let _ = fs::remove_file(&partial);
                 return Err(e.into());
             }
-            split::discard_stale_volumes(dest, 1)?;
+            let _ = split::discard_stale_volumes(dest, 1);
             Ok(report)
         }
         Err(e) => {
@@ -213,7 +213,7 @@ fn write_plan_split(
     match write_plan_into(&mut out, plan, dest, password, progress, cancel) {
         Ok(report) => {
             let pieces = out.finish()?;
-            split::discard_stale_volumes(dest, pieces.len() as u32)?;
+            let _ = split::discard_stale_volumes(dest, pieces.len() as u32);
             Ok(report)
         }
         Err(e) => {
