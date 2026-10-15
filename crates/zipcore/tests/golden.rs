@@ -289,6 +289,10 @@ fn windows_extract_ps1_is_utf8_bom_ascii() {
         text.contains(r#"& "$Seven""#),
         "7-Zip invocation must quote the executable path"
     );
+    assert!(
+        text.contains("optional extractors skipped for password ZIP"),
+        "AES cases must skip Explorer/tar/Shell so the job cannot hang on a password prompt"
+    );
 }
 
 #[test]
