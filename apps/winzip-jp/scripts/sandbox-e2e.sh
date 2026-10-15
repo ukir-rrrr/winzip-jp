@@ -112,11 +112,20 @@ fi
 echo "sandbox probe ok"
 
 # S1 相当: 起動直後の作成ドロップゾーン。フィクスチャは開かない。
-open "$APP" || true
-sleep 2
+open "$APP"
+for _ in $(seq 1 20); do
+  if pgrep -x "送りZIP" >/dev/null 2>&1 || pgrep -x "winzip-jp" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if ! pgrep -x "送りZIP" >/dev/null 2>&1 && ! pgrep -x "winzip-jp" >/dev/null 2>&1; then
+  echo "送りZIP が起動しませんでした" >&2
+  exit 1
+fi
 osascript -e 'tell application "送りZIP" to activate' >/dev/null 2>&1 || true
 sleep 10
-screencapture -x "$ARTIFACTS/s1-sandbox.png" || true
+screencapture -x "$ARTIFACTS/s1-sandbox.png"
 # スクリプト自身（パスに winzip-jp を含む）は殺さない
 killall "送りZIP" >/dev/null 2>&1 || true
 killall "winzip-jp" >/dev/null 2>&1 || true
@@ -205,5 +214,7 @@ ratio = nonwhite / total if total else 0
 print(f"s1 nonwhite={nonwhite}/{total} ({ratio:.3f})")
 if ratio < 0.02:
     raise SystemExit("s1-sandbox.png の WebView が白画面のままです")
+if ratio > 0.80:
+    raise SystemExit("s1-sandbox.png にアプリウィンドウが見えません（暗い画面だけ）")
 PY
 echo "wrote $ARTIFACTS/s1-sandbox.png"
