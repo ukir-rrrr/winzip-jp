@@ -330,15 +330,6 @@ pub fn cancel_job(state: tauri::State<'_, AppState>) {
 }
 
 #[tauri::command]
-pub fn accept_dropped_paths(
-    state: tauri::State<'_, AppState>,
-    paths: Vec<String>,
-) -> Result<Vec<String>, String> {
-    let sandbox = lock_sandbox(&state.sandbox)?;
-    accepted_dropped_paths(&sandbox, &paths)
-}
-
-#[tauri::command]
 pub async fn pick_files(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,

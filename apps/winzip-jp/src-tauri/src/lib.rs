@@ -25,7 +25,6 @@ pub fn run() {
             commands::list_archive,
             commands::extract_archive,
             commands::cancel_job,
-            commands::accept_dropped_paths,
             commands::pick_files,
             commands::pick_save_zip,
             commands::pick_extract_dir,
