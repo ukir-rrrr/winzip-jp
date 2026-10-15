@@ -16,12 +16,14 @@ function kindLabel(kind: UnmappableKind): string {
 export function UnmappableSheet({
   issues,
   replacements,
+  locked = false,
   onChange,
   onConfirm,
   onDismiss,
 }: {
   issues: Unmappable[];
   replacements: Record<string, string>;
+  locked?: boolean;
   onChange: (relativePath: string, value: string) => void;
   onConfirm: () => void;
   onDismiss: () => void;
@@ -63,6 +65,7 @@ export function UnmappableSheet({
                     className="sheet-input"
                     value={replacements[issue.relativePath] ?? suggestedPath(issue.relativePath, issues)}
                     onChange={(event) => onChange(issue.relativePath, event.target.value)}
+                    disabled={locked}
                     data-testid={`repl-${issue.relativePath}`}
                   />
                 </td>
@@ -83,6 +86,7 @@ export function UnmappableSheet({
           type="button"
           className="cmd-btn"
           data-testid="btn-confirm-replace"
+          disabled={locked}
           onClick={onConfirm}
         >
           {COPY.confirmReplace}

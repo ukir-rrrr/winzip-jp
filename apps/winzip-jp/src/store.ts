@@ -186,13 +186,14 @@ export const useAppStore = create<AppState>((set, get) => {
     }
   }
 
-  function startCreate(): Promise<void> {
-    const { dropped, plan, replacements } = get();
+  function startCreate(replacements?: Record<string, string>): Promise<void> {
+    const { dropped, plan } = get();
+    const names = replacements ?? get().replacements;
     return runJob(
       "create",
       () => getApi().pickSaveZip(destHint(plan, "archive.zip")),
       (dest) =>
-        getApi().createArchive({ paths: dropped, replacements: normalizeReplacements(replacements) }, dest),
+        getApi().createArchive({ paths: dropped, replacements: normalizeReplacements(names) }, dest),
       COPY.noDest,
     );
   }
@@ -290,6 +291,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     updateReplacement(relativePath, suggested) {
+      if (get().confirming) {
+        return;
+      }
       const issues = get().plan?.issues ?? [];
       const ready = replacementIsReady(suggested, relativePath, issues);
       set({
@@ -324,12 +328,13 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ confirming: true });
       try {
         const issues = get().plan?.issues ?? [];
-        if (!replacementsOk(get().replacements, issues)) {
+        const replacements = { ...get().replacements };
+        if (!replacementsOk(replacements, issues)) {
           set({ error: COPY.invalidReplacement, sheet: "open" });
           return;
         }
         const names = [...new Set(issues.map((issue) => issue.relativePath))].map((path) =>
-          normalizeReplacement(get().replacements[path] ?? ""),
+          normalizeReplacement(replacements[path] ?? ""),
         );
         try {
           if (names.length > 0 && !(await getApi().checkNames(names))) {
@@ -344,7 +349,7 @@ export const useAppStore = create<AppState>((set, get) => {
           return;
         }
         set({ sheet: "none" });
-        await startCreate();
+        await startCreate(replacements);
       } finally {
         set({ confirming: false });
       }

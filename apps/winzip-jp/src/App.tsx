@@ -19,6 +19,7 @@ export default function App() {
   const issues = plan?.issues ?? [];
   const replacements = useAppStore((s) => s.replacements);
   const job = useAppStore((s) => s.job);
+  const confirming = useAppStore((s) => s.confirming);
   const encodingOverride = useAppStore((s) => s.encodingOverride);
   const isCreate = mode === "create";
   const modalOpen = sheet === "open" || job !== null;
@@ -147,6 +148,7 @@ export default function App() {
             <UnmappableSheet
               issues={issues}
               replacements={replacements}
+              locked={confirming}
               onChange={(path, value) => useAppStore.getState().updateReplacement(path, value)}
               onConfirm={() => void useAppStore.getState().confirmAndCreate()}
               onDismiss={() => useAppStore.getState().dismissSheet()}

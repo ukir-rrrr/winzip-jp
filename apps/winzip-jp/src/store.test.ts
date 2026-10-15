@@ -111,6 +111,34 @@ describe("replacements 契約", () => {
     assert.equal(createCalls, 1);
   });
 
+  it("確定中の置き換え変更は作成に渡さない", async () => {
+    let finishCheck!: (ok: boolean) => void;
+    let sent: Record<string, string> | undefined;
+    installApi({
+      async planArchive() {
+        return S3_PLAN;
+      },
+      checkNames: () =>
+        new Promise((resolve) => {
+          finishCheck = resolve;
+        }),
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        sent = req.replacements;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    const pending = useAppStore.getState().confirmAndCreate();
+    useAppStore.getState().updateReplacement("髙.png", "a:b.png");
+    assert.equal(useAppStore.getState().replacements["髙.png"], "高.png");
+    finishCheck(true);
+    await pending;
+    assert.equal(sent?.["髙.png"], "高.png");
+  });
+
   it("絵文字の置換では作成しない", async () => {
     installApi({
       async planArchive() {

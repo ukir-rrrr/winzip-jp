@@ -330,6 +330,10 @@ body,
   font: inherit;
 }
 
+[data-ui] .sheet-input:disabled {
+  opacity: 0.45;
+}
+
 [data-ui] .sheet-actions {
   display: flex;
   justify-content: flex-end;
