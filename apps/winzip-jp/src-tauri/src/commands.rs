@@ -72,15 +72,17 @@ fn io_ja(err: std::io::Error) -> String {
 fn resolve_inputs(sandbox: &Sandbox, paths: &[String]) -> Result<Vec<InputItem>, String> {
     let mut inputs = Vec::with_capacity(paths.len());
     for raw in paths {
-        let path = sandbox.resolve(&path_buf(raw))?;
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|_| format!("入力が見つかりません: {}", path.display()))?;
+        let given = path_buf(raw);
+        let abs = zipcore::absolute(&given);
+        let meta = fs::symlink_metadata(&abs)
+            .map_err(|_| format!("入力が見つかりません: {}", abs.display()))?;
         if meta.file_type().is_symlink() {
             return Err(format!(
                 "シンボリックリンクは扱えません: {}",
-                path.display()
+                abs.display()
             ));
         }
+        let path = sandbox.resolve(&given)?;
         inputs.push(InputItem {
             as_dir: meta.is_dir(),
             abs_path: path,

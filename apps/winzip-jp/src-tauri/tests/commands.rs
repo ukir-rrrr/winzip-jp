@@ -273,6 +273,32 @@ fn js_cannot_grant_ungranted_paths() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[cfg(unix)]
+#[test]
+fn symlink_input_is_rejected_before_follow() {
+    let root = unique_dir("symlink");
+    let real = root.join("real.txt");
+    let link = root.join("link.txt");
+    let dest = root.join("out.zip");
+    fs::write(&real, b"x").unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let sandbox = grant(&[&root, &real, &link, &dest]);
+    let err = create_archive_direct(
+        &sandbox,
+        &CreateDto {
+            paths: vec![link.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("シンボリックリンク"), "{err}");
+    assert!(!dest.exists());
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn create_rejects_directory_as_dest() {
     let root = unique_dir("dest-dir");
