@@ -1,0 +1,13 @@
+{
+  "name": "winzip-jp-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.33.4",
+  "scripts": {
+    "dev": "pnpm --filter winzip-jp dev",
+    "build": "pnpm --filter winzip-jp build",
+    "preview": "pnpm --filter winzip-jp preview",
+    "tauri": "pnpm --filter winzip-jp tauri",
+    "build:debug": "pnpm --filter winzip-jp build:debug",
+    "e2e": "pnpm --filter winzip-jp e2e"
+  }
+}
