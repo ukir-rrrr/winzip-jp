@@ -293,7 +293,13 @@ fn publish_across_volumes_inner(
         }
         Err(e) => {
             if let Some(bak) = backup {
-                restore_or_keep_backup(&bak, dest);
+                if !restore_or_keep_backup(&bak, dest) {
+                    discard_tmp(tmp);
+                    return Err(io::Error::new(
+                        e.kind(),
+                        format!("{}（元の保存先の退避: {}）", e, bak.display()),
+                    ));
+                }
             } else {
                 let _ = fs::remove_file(dest);
             }
@@ -317,9 +323,12 @@ fn copy_tmp_to_dest(tmp: &Path, dest: &Path) -> io::Result<u64> {
     fs::copy(tmp, dest)
 }
 
-fn restore_or_keep_backup(bak: &Path, dest: &Path) {
+fn restore_or_keep_backup(bak: &Path, dest: &Path) -> bool {
     if fs::copy(bak, dest).is_ok() {
         let _ = fs::remove_file(bak);
+        true
+    } else {
+        false
     }
 }
 
@@ -543,7 +552,8 @@ mod tests {
         FAIL_AFTER_TRUNCATE.with(|c| c.set(true));
         let err = publish_across_volumes_inner(&tmp, &dest, Some(bak.clone()));
         FAIL_AFTER_TRUNCATE.with(|c| c.set(false));
-        assert!(err.is_err());
+        let err = err.unwrap_err();
+        assert!(err.to_string().contains(&bak.display().to_string()));
         assert!(!tmp.exists());
         assert!(bak.exists());
         assert_eq!(fs::read(&bak).unwrap(), b"old");
