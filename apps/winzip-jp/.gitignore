@@ -17,7 +17,8 @@ dist-ssr
 !.vscode/extensions.json
 .idea
 .DS_Store
-e2e/artifacts/*.png
+e2e/artifacts/
+e2e/artifacts/**
 *.suo
 *.ntvs*
 *.njsproj

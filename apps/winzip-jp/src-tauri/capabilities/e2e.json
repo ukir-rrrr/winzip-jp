@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "e2e",
+  "description": "WebdriverIO 用。提出用 App Store ビルドでは読まない",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}

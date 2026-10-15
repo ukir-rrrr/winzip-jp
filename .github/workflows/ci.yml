@@ -85,11 +85,12 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: browser-actions/setup-chrome@v2
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build frontend
-        run: pnpm --filter winzip-jp build
-      - name: Capture S1 screenshot
+      - name: Build frontend for E2E
+        run: VITE_E2E=1 pnpm --filter winzip-jp build
+      - name: WebdriverIO S1–S8 + pixelmatch
         run: pnpm --filter winzip-jp e2e
       - name: Build Tauri debug app
         run: pnpm --filter winzip-jp build:debug

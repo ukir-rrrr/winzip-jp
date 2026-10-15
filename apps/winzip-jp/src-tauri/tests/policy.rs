@@ -90,6 +90,14 @@ fn appstore_entitlements_match_design_section_4_1() {
         json.get("plugins").is_none() || json["plugins"].get("persisted-scope").is_none(),
         "persisted-scope を付けない"
     );
+    assert!(
+        appstore.contains("Entitlements.plist"),
+        "提出用設定が entitlements を指していない"
+    );
+    assert!(
+        !appstore.contains("wdio") && !appstore.contains("e2e"),
+        "提出用設定に Webdriver を入れない"
+    );
 }
 
 #[test]
@@ -97,6 +105,7 @@ fn fs_scope_does_not_include_home() {
     let mut files = vec![
         tauri_dir().join("tauri.conf.json"),
         tauri_dir().join("tauri.appstore.conf.json"),
+        tauri_dir().join("tauri.e2e.conf.json"),
         tauri_dir().join("capabilities/default.json"),
         tauri_dir().join("Cargo.toml"),
         tauri_dir().join("Entitlements.plist"),

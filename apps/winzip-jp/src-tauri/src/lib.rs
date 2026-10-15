@@ -10,7 +10,7 @@ pub use commands::{
     accepted_dropped_paths, create_archive_direct, extract_archive_direct, list_archive_direct,
     plan_archive_direct, PROGRESS_EVENT,
 };
-pub use dto::{CreateDto, ExtractDto, ListReportDto, WriteReportDto};
+pub use dto::{CreateDto, ExtractDto, ListReportDto, PlanDto, WriteReportDto};
 pub use sandbox::Sandbox;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -7,8 +7,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use winzip_jp_lib::{
-    create_archive_direct, extract_archive_direct, list_archive_direct, CreateDto, ExtractDto,
-    Sandbox, PROGRESS_EVENT,
+    create_archive_direct, extract_archive_direct, list_archive_direct, plan_archive_direct,
+    CreateDto, ExtractDto, Sandbox, PROGRESS_EVENT,
 };
 use zipcore::{inspect_zip_headers, NameEncoding, Progress, ProgressPhase, EFS_UTF8_BIT};
 
@@ -124,6 +124,28 @@ fn create_list_extract_with_direct_paths() {
     assert!(dest.exists());
     assert!(!dest.with_extension("zip.partial").exists());
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn plan_archive_lists_unmappable_taka() {
+    let src = workspace_root().join("tests/golden/04-replacements/src");
+    let mut sandbox = Sandbox::new();
+    sandbox.grant(&src);
+    let plan = plan_archive_direct(&sandbox, &[src.to_string_lossy().into_owned()], None)
+        .expect("plan");
+    let json = serde_json::to_value(&plan).expect("plan json");
+    let issues = json["issues"].as_array().expect("issues");
+    assert!(
+        issues.iter().any(|issue| {
+            issue["relativePath"]
+                .as_str()
+                .is_some_and(|p| p.contains('髙'))
+                && issue["suggested"].as_str().is_some_and(|s| s.contains('高'))
+        }),
+        "{json}"
+    );
+    assert!(issues[0].get("relativePath").is_some(), "{json}");
+    assert!(issues[0].get("relative_path").is_none(), "{json}");
 }
 
 #[test]
