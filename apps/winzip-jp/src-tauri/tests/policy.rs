@@ -160,7 +160,7 @@ fn capabilities_are_pinned_to_default() {
         !tauri_dir().join("capabilities/e2e.json").exists(),
         "e2e.json は全ビルドに載るので置かない"
     );
-    let names: Vec<String> = fs::read_dir(tauri_dir().join("capabilities"))
+    let mut names: Vec<String> = fs::read_dir(tauri_dir().join("capabilities"))
         .expect("capabilities")
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
