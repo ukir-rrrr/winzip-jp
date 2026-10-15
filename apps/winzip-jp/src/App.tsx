@@ -69,16 +69,13 @@ export default function App() {
         <section
           className="dropzone-shell"
           data-mode={mode}
+          aria-label={
+            isCreate
+              ? "ファイルをドロップして ZIP を作成"
+              : "文字化けした ZIP をドロップして解凍"
+          }
         >
-          <div
-            className="dropzone"
-            data-testid="dropzone"
-            aria-label={
-              isCreate
-                ? "ファイルをドロップして ZIP を作成"
-                : "文字化けした ZIP をドロップして解凍"
-            }
-          >
+          <div className="dropzone" data-testid="dropzone">
             <ArchiveMark mode={mode} />
             <p className="dropzone-title">
               {isCreate

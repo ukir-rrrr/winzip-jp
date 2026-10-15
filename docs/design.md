@@ -304,7 +304,7 @@ React は 3 画面だけ。
 
 #### UI ライブラリとテーマ
 
-UI ライブラリは **Mantine 最新安定版**（導入時点 9.7.x）。`@mantine/core` と `@mantine/hooks` だけを入れる。dates / charts / notifications / carousel などは使わない（バンドルサイズ）。コンポーネントは named import。CSS は使う部品に限定してよいが、Hello 時点は `@mantine/core/styles.css` 1 本で足りる。
+UI ライブラリは **Mantine 最新安定版**（導入時点 9.7.x）。`@mantine/core` と `@mantine/hooks` だけを入れる。dates / charts / notifications / carousel などは使わない（バンドルサイズ）。コンポーネントは named import。CSS は使う部品だけ読む。Hello 時点は `baseline` / `default-css-variables` / `global` / `UnstyledButton` / `Title` の 5 ファイル。
 
 テーマは macOS / Finder に寄せる。
 
