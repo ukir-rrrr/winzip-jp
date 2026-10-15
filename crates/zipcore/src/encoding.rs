@@ -23,12 +23,15 @@ pub const COMPAT_IDEOGRAPH_REPLACEMENTS: &[(char, char)] = &[
 
 /// WHATWG Shift_JIS が ASCII に落とす文字と、Windows CP932 では全角形で持つ記号。
 const SYMBOL_REPLACEMENTS: &[(char, char)] = &[
-    ('\u{00A5}', '\u{FFE5}'), // ¥ → ￥（0x5C 回避）
-    ('\u{203E}', '\u{FFE3}'), // ‾ → ￣（0x7E 回避）
+    ('\u{00A5}', '\u{FFE5}'), // ¥ → ￥（単バイト 0x5C 回避）
+    ('\u{203E}', '\u{FFE3}'), // ‾ → ￣（単バイト 0x7E 回避）
     ('\u{301C}', '\u{FF5E}'), // 〜 → ～
+    ('\u{2212}', '\u{FF0D}'), // − → －
     ('\u{00A2}', '\u{FFE0}'), // ¢ → ￠
     ('\u{00A3}', '\u{FFE1}'), // £ → ￡
     ('\u{00AC}', '\u{FFE2}'), // ¬ → ￢
+    ('\u{2016}', '\u{2225}'), // ‖ → ∥
+    ('\u{2014}', '\u{2015}'), // — → ―
 ];
 
 const CONF_EFS_MAJORITY: f32 = 0.95;
@@ -80,6 +83,8 @@ pub struct Detection {
 
 /// Unicode の ZIP エントリ名を NFC → 置換表 → CP932 にする。
 ///
+/// パス成分が `.` または `..` のときは、置換の有無にかかわらず `_` にする
+/// （ZIP 名にパストラバーサル成分を残さない）。
 /// 同一 ZIP 内のバイト列衝突（` (2)` 連番）は `plan_write`（PR 2）側の責務。
 pub fn encode_entry_name(unicode_path: &str) -> EncodedName {
     let slash_path = unicode_path.replace('\\', "/");
@@ -201,12 +206,10 @@ pub fn is_junk(rel: impl AsRef<Path>) -> bool {
 
 fn encode_component(nfc: &str, relative_path: &str, issues: &mut Vec<Unmappable>) -> Vec<u8> {
     let mut mapped = String::new();
-    let mut replaced = false;
     for grapheme in nfc.graphemes(true) {
         match replace_grapheme(grapheme) {
             GraphemeMap::Keep { text } => mapped.push_str(&text),
             GraphemeMap::Replace { suggested, kind } => {
-                replaced = true;
                 issues.push(Unmappable {
                     relative_path: relative_path.to_string(),
                     original_char: grapheme.to_string(),
@@ -218,7 +221,16 @@ fn encode_component(nfc: &str, relative_path: &str, issues: &mut Vec<Unmappable>
         }
     }
 
-    if mapped.is_empty() || (replaced && (mapped == "." || mapped == "..")) {
+    // `.` / `..` は半角のまま残さない（設計 §3.2。置換を経由しなくても同じ）。
+    if mapped.is_empty() || mapped == "." || mapped == ".." {
+        if mapped == "." || mapped == ".." {
+            issues.push(Unmappable {
+                relative_path: relative_path.to_string(),
+                original_char: mapped.clone(),
+                suggested: "_".to_string(),
+                kind: UnmappableKind::Other,
+            });
+        }
         mapped = "_".to_string();
     }
 
@@ -613,9 +625,46 @@ mod tests {
         assert_eq!(hex(&encode_entry_name("㈱").cp932), "878A");
         assert_eq!(hex(&encode_entry_name("～").cp932), "8160");
         assert_eq!(hex(&encode_entry_name("￥").cp932), "818F");
+        assert_eq!(hex(&encode_entry_name("－").cp932), "817C");
         assert_eq!(hex(&encode_entry_name("¢").cp932), "8191");
         assert_eq!(hex(&encode_entry_name("£").cp932), "8192");
         assert_eq!(hex(&encode_entry_name("¬").cp932), "81CA");
+    }
+
+    #[test]
+    fn windows_lookalike_symbols_are_replaced_not_underscore() {
+        let minus = encode_entry_name("−");
+        assert_eq!(hex(&minus.cp932), "817C");
+        assert_eq!(minus.issues[0].suggested, "－");
+        assert_eq!(minus.issues[0].kind, UnmappableKind::Other);
+
+        let dbl_bar = encode_entry_name("‖");
+        assert_eq!(hex(&dbl_bar.cp932), "8161");
+        assert_eq!(dbl_bar.issues[0].suggested, "∥");
+
+        let em_dash = encode_entry_name("—");
+        assert_eq!(hex(&em_dash.cp932), "815C");
+        assert_eq!(em_dash.issues[0].suggested, "―");
+        assert_ne!(em_dash.cp932, b"_");
+    }
+
+    #[test]
+    fn dot_and_dotdot_components_always_become_underscore() {
+        let dot = encode_entry_name(".");
+        assert_eq!(dot.cp932, b"_");
+        assert_eq!(dot.issues[0].original_char, ".");
+        assert_eq!(dot.issues[0].suggested, "_");
+
+        let dotdot = encode_entry_name("..");
+        assert_eq!(dotdot.cp932, b"_");
+        assert_eq!(dotdot.issues[0].original_char, "..");
+
+        let nested = encode_entry_name("foo/../bar");
+        assert_eq!(nested.cp932, b"foo/_/bar");
+        assert!(nested.issues.iter().any(|i| i.original_char == ".."));
+
+        let hidden = encode_entry_name(".DS_Store");
+        assert_eq!(hidden.cp932, b".DS_Store");
     }
 
     #[test]
