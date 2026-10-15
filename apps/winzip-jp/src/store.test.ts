@@ -143,6 +143,32 @@ describe("シートのやめる", () => {
     assert.equal(useAppStore.getState().sheet, "open");
     assert.equal(useAppStore.getState().error, COPY.needConfirm);
   });
+
+  it("確定中にやめると作成しない", async () => {
+    let finishCheck!: (ok: boolean) => void;
+    installApi({
+      async planArchive() {
+        return S3_PLAN;
+      },
+      checkNames: () =>
+        new Promise((resolve) => {
+          finishCheck = resolve;
+        }),
+      async pickSaveZip() {
+        throw new Error("呼ばれてはいけない");
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    const pending = useAppStore.getState().confirmAndCreate();
+    useAppStore.getState().dismissSheet();
+    finishCheck(true);
+    await pending;
+    assert.equal(useAppStore.getState().sheet, "dismissed");
+    assert.equal(useAppStore.getState().job, null);
+  });
 });
 
 describe("世代トークン", () => {

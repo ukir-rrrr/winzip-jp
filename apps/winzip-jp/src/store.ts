@@ -340,6 +340,9 @@ export const useAppStore = create<AppState>((set, get) => {
           set({ error: errText(err), sheet: "open" });
           return;
         }
+        if (get().sheet === "dismissed") {
+          return;
+        }
         set({ sheet: "none" });
         await startCreate();
       } finally {
