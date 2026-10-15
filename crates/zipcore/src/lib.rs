@@ -28,7 +28,7 @@ pub use job::{Progress, ProgressPhase, SecretString};
 pub use read::{
     extract_zip, list_zip, ExtractReport, ExtractRequest, ListReport, ListRequest, ListedEntry,
 };
-pub use split::{discover_volumes, join_volumes, join_volumes_to};
+pub use split::{discover_volumes, join_volumes_to};
 pub use write::{
     inspect_zip_headers, plan_write, write_zip, AesMode, InputItem, InspectedEntry, Plan,
     PlannedEntry, WriteReport, WriteRequest,

@@ -183,8 +183,9 @@ pub fn discard_partials_for(dest: &Path) {
     }
 }
 
-/// 分割セットを 1 本の ZIP バイト列に連結する（検査・zip crate 展開用）。
-pub fn join_volumes(zip_path: &Path) -> io::Result<Vec<u8>> {
+/// 生連結（オフセットは直さない）。検査・展開は `join_volumes_to` / `linearize_volumes`。
+#[cfg(test)]
+fn join_volumes(zip_path: &Path) -> io::Result<Vec<u8>> {
     let volumes = discover_volumes(zip_path);
     let mut buf = Vec::new();
     for p in volumes {
@@ -320,103 +321,6 @@ pub fn last_volume_eocd(zip_path: &Path) -> io::Result<(u16, u16, u32, u32)> {
         u32::from_le_bytes(data[eocd + 12..eocd + 16].try_into().unwrap()),
         u32::from_le_bytes(data[eocd + 16..eocd + 20].try_into().unwrap()),
     ))
-}
-
-/// 連結ストリームとして分割ピースを読む。
-pub struct ConcatReader {
-    files: Vec<File>,
-    sizes: Vec<u64>,
-    pos: u64,
-    total: u64,
-}
-
-impl ConcatReader {
-    pub fn open(volumes: &[PathBuf]) -> io::Result<Self> {
-        let mut files = Vec::with_capacity(volumes.len());
-        let mut sizes = Vec::with_capacity(volumes.len());
-        let mut total = 0u64;
-        for p in volumes {
-            let f = File::open(p)?;
-            let len = f.metadata()?.len();
-            files.push(f);
-            sizes.push(len);
-            total = total.saturating_add(len);
-        }
-        Ok(Self {
-            files,
-            sizes,
-            pos: 0,
-            total,
-        })
-    }
-
-    fn locate(&mut self) -> io::Result<(usize, u64)> {
-        let mut remain = self.pos;
-        for (i, size) in self.sizes.iter().copied().enumerate() {
-            if remain < size || i + 1 == self.sizes.len() {
-                self.files[i].seek(SeekFrom::Start(remain))?;
-                return Ok((i, remain));
-            }
-            remain -= size;
-        }
-        Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "分割ピースの位置が範囲外です",
-        ))
-    }
-}
-
-impl Read for ConcatReader {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-        let mut last_idx = None;
-        while self.pos < self.total {
-            let (idx, _) = self.locate()?;
-            let n = self.files[idx].read(buf)?;
-            if n > 0 {
-                self.pos += n as u64;
-                return Ok(n);
-            }
-            if last_idx == Some(idx) {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "分割ピースが途中で終わりました",
-                ));
-            }
-            last_idx = Some(idx);
-            let piece_end: u64 = self.sizes.iter().take(idx + 1).copied().sum();
-            if self.pos < piece_end {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "分割ピースが途中で終わりました",
-                ));
-            }
-            if idx + 1 >= self.files.len() {
-                break;
-            }
-        }
-        Ok(0)
-    }
-}
-
-impl Seek for ConcatReader {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        let next = match pos {
-            SeekFrom::Start(p) => p,
-            SeekFrom::End(p) => self.total.saturating_add_signed(p),
-            SeekFrom::Current(p) => self.pos.saturating_add_signed(p),
-        };
-        if next > self.total {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "分割ピースの末尾を超えています",
-            ));
-        }
-        self.pos = next;
-        Ok(self.pos)
-    }
 }
 
 /// 分割時は最後のピースに CD/EOCD を載せ、ディスク番号とディスク相対オフセットを書く。
@@ -695,7 +599,7 @@ pub fn piece_sizes(zip_path: &Path) -> io::Result<Vec<u64>> {
 mod tests {
     use super::tests_support::TempDir;
     use super::*;
-    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::io::{Seek, SeekFrom, Write};
 
     #[test]
     fn volume_names_are_z01_then_zip() {
@@ -751,10 +655,6 @@ mod tests {
         assert_eq!(joined.len(), 40);
         assert_eq!(&joined[2..4], &[9, 9]);
         assert_eq!(joined[0], 1);
-        let mut concat = ConcatReader::open(&pieces).unwrap();
-        let mut got = Vec::new();
-        concat.read_to_end(&mut got).unwrap();
-        assert_eq!(got, joined);
     }
 
     #[test]
