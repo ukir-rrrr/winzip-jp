@@ -94,6 +94,13 @@ body,
   background: var(--app-well-outer);
 }
 
+[data-ui] .dropzone-body {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
 [data-ui] .dropzone,
 [data-ui] .work-pane {
   flex: 1;

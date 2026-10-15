@@ -65,7 +65,7 @@ const JA_ACRONYM_REWRITES: ReadonlyArray<readonly [string, string]> = [
 export function toUiJa(msg: string): string {
   let out = msg;
   for (const [from, to] of JA_ACRONYM_REWRITES) {
-    out = out.replaceAll(from, to);
+    out = out.split(from).join(to);
   }
   return out;
 }

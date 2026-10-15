@@ -72,7 +72,7 @@ export default function App() {
 
   return (
     <Box className="shell" data-ui data-mode={mode} data-testid="app-shell">
-      <Box component="header" className="toolbar" inert={modalOpen}>
+      <Box component="header" className="toolbar" inert={modalOpen || undefined}>
         <Title order={1} className="app-title">
           {COPY.appTitle}
         </Title>
@@ -121,7 +121,7 @@ export default function App() {
           data-mode={mode}
           aria-label={isCreate ? COPY.dropCreate : COPY.dropExtract}
         >
-          <div inert={modalOpen}>
+          <div className="dropzone-body" inert={modalOpen || undefined}>
             {isCreate ? (
               <CreateScreen
                 plan={plan}
