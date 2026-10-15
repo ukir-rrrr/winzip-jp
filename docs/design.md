@@ -163,7 +163,7 @@ React UI  --invoke-->  Tauri commands  -->  sandbox.rs
 
 ### 2.3 `zipcore` の API
 
-モジュールは 4 つ。`encoding` / `write` / `read` / `split`。`split` は `write` の出力ストリームを差し替えるだけ。
+モジュールは 4 つ。`encoding` / `write` / `read` / `split`。`split` は出力ストリームを差し替え、分割時だけ EOCD / 中央ディレクトリにディスク番号とディスク相対オフセットを書く（7-Zip は `ThisDisk == 0` だと最後の `.zip` だけを単体として開く）。非分割のヘッダ契約（CP932 `name_raw`、bit 11 = 0、disk = 0）は変えない。
 
 ```rust
 // crates/zipcore/src/encoding.rs
@@ -904,6 +904,8 @@ Pullfrog の GitHub 操作はワークフローの `GITHUB_TOKEN` を使わな�
 ### PR 7 — 分割
 
 内容: `split_bytes`。`.z01` … 最後が `.zip`。
+
+分割の上書きは、新しいセットに含まれない同じ stem の `.zNN` を消す（別アーカイブではなくその ZIP のピース）。非分割の保存は隣の `.zNN` を消さない。読み取りは EOCD の ThisDisk で兄弟を切る。
 
 完了条件:
 

@@ -17,6 +17,7 @@ import type {
   Unmappable,
   WriteReport,
 } from "./types";
+import { DEFAULT_SPLIT_MB, splitMbToBytes } from "./types";
 
 export type JobKind = "create" | "extract";
 
@@ -39,6 +40,9 @@ export type AppState = {
   encodingOverride: NameEncoding | null;
   aesEnabled: boolean;
   password: string;
+  splitEnabled: boolean;
+  splitPresetMb: 8 | 10 | 25 | 100 | "custom";
+  splitCustomMb: string;
   job: Job | null;
   confirming: boolean;
   epoch: number;
@@ -54,6 +58,9 @@ export type AppState = {
   createZip: () => Promise<void>;
   setAesEnabled: (on: boolean) => void;
   setPassword: (password: string) => void;
+  setSplitEnabled: (on: boolean) => void;
+  setSplitPresetMb: (value: 8 | 10 | 25 | 100 | "custom") => void;
+  setSplitCustomMb: (value: string) => void;
   setEncoding: (encoding: NameEncoding) => Promise<void>;
   extractZip: () => Promise<void>;
   cancel: () => Promise<void>;
@@ -191,10 +198,42 @@ export const useAppStore = create<AppState>((set, get) => {
     }
   }
 
+  function splitBytesOrError(): number | null | "invalid" | "empty" {
+    const { splitEnabled, splitPresetMb, splitCustomMb } = get();
+    if (!splitEnabled) {
+      return null;
+    }
+    if (splitPresetMb !== "custom") {
+      return splitMbToBytes(splitPresetMb);
+    }
+    const trimmed = splitCustomMb.trim();
+    if (trimmed.length === 0) {
+      return "empty";
+    }
+    const mb = Number(trimmed);
+    if (!Number.isSafeInteger(mb) || mb <= 0) {
+      return "invalid";
+    }
+    const bytes = splitMbToBytes(mb);
+    if (!Number.isSafeInteger(bytes) || bytes <= 0) {
+      return "invalid";
+    }
+    return bytes;
+  }
+
   function startCreate(replacements: Record<string, string>): Promise<void> {
     const { dropped, plan, aesEnabled, password } = get();
     if (aesEnabled && password.length === 0) {
       set({ error: COPY.emptyPassword, job: null });
+      return Promise.resolve();
+    }
+    const split = splitBytesOrError();
+    if (split === "empty") {
+      set({ error: COPY.splitCustomNeed, job: null });
+      return Promise.resolve();
+    }
+    if (split === "invalid") {
+      set({ error: COPY.splitCustomInvalid, job: null });
       return Promise.resolve();
     }
     const sentPassword = aesEnabled ? password : null;
@@ -208,6 +247,7 @@ export const useAppStore = create<AppState>((set, get) => {
             paths: dropped,
             replacements: normalizeReplacements(replacements),
             password: sentPassword,
+            splitBytes: split,
           },
           dest,
         );
@@ -221,13 +261,24 @@ export const useAppStore = create<AppState>((set, get) => {
     epoch: 0,
     aesEnabled: false,
     password: "",
+    splitEnabled: false,
+    splitPresetMb: DEFAULT_SPLIT_MB,
+    splitCustomMb: "",
     ...emptyWork,
 
     setMode(mode) {
       if (isBlocked()) {
         return;
       }
-      begin({ mode, aesEnabled: false, password: "", ...emptyWork });
+      begin({
+        mode,
+        aesEnabled: false,
+        password: "",
+        splitEnabled: false,
+        splitPresetMb: DEFAULT_SPLIT_MB,
+        splitCustomMb: "",
+        ...emptyWork,
+      });
     },
 
     setAesEnabled(on) {
@@ -248,6 +299,47 @@ export const useAppStore = create<AppState>((set, get) => {
       set({
         password,
         error: get().error === COPY.emptyPassword && password.length > 0 ? "" : get().error,
+      });
+    },
+
+    setSplitEnabled(on) {
+      if (isBlocked()) {
+        return;
+      }
+      set({
+        splitEnabled: on,
+        error:
+          !on &&
+          (get().error === COPY.splitCustomNeed || get().error === COPY.splitCustomInvalid)
+            ? ""
+            : get().error,
+      });
+    },
+
+    setSplitPresetMb(value) {
+      if (isBlocked()) {
+        return;
+      }
+      set({
+        splitPresetMb: value,
+        error:
+          get().error === COPY.splitCustomNeed || get().error === COPY.splitCustomInvalid
+            ? ""
+            : get().error,
+      });
+    },
+
+    setSplitCustomMb(value) {
+      if (isBlocked()) {
+        return;
+      }
+      set({
+        splitCustomMb: value,
+        error:
+          (get().error === COPY.splitCustomNeed || get().error === COPY.splitCustomInvalid) &&
+          value.trim().length > 0
+            ? ""
+            : get().error,
       });
     },
 

@@ -15,7 +15,7 @@ async function openScene(id?: string): Promise<void> {
   await $("[data-testid='app-shell']").waitForDisplayed();
 }
 
-describe("画面 S1–S9", () => {
+describe("画面 S1–S9b", () => {
   it("S1 起動: 作成ドロップゾーンと VoiceOver 名", async () => {
     await openScene();
     const create = $("[data-testid='tab-create']");
@@ -122,6 +122,22 @@ describe("画面 S1–S9", () => {
     expect(body).toContain("Windows のエクスプローラーでは開けません");
     expect(body).toContain("先方も UTF-8 前提のツールに限ります");
     await shot("s9");
+  });
+
+  it("S9b 分割オプション: エクスプローラー警告", async () => {
+    await openScene();
+    await $("[data-testid='split-toggle']").click();
+    await expect($("[data-testid='split-toggle']")).toHaveAttribute("aria-checked", "true");
+    await expect($("[data-testid='split-warning']")).toHaveText(
+      "分割した ZIP もエクスプローラーでは開けません。",
+    );
+    const body = await $("body").getText();
+    expect(body).toContain("分割した ZIP もエクスプローラーでは開けません。");
+    expect(body).toContain("8 MB");
+    expect(body).toContain("10 MB");
+    expect(body).toContain("25 MB");
+    expect(body).toContain("100 MB");
+    await shot("s9b");
   });
 
   it("展開 CRC 不一致は英語頭字語を出さない", async () => {

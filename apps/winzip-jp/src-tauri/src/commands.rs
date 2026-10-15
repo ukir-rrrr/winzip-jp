@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::Emitter;
+use zipcore::split::is_split_sibling;
 use zipcore::{
     absolute, encode_entry_name, extract_zip, inspect_zip_headers, list_zip, normalize_lexically,
     path_eq, plan_write, stays_under, write_zip, AesMode, ExtractRequest, InputItem, ListRequest,
@@ -17,7 +18,7 @@ use crate::dto::{
     path_buf, starting_progress, CreateDto, ExtractDto, ExtractReportDto, ListReportDto, PlanDto,
     ProgressDto, WriteReportDto,
 };
-use crate::sandbox::{container_tmp_zip, discard_tmp, publish_tmp, PublishError, Sandbox};
+use crate::sandbox::{container_tmp_zip, discard_tmp, publish_tmp_set, PublishError, Sandbox};
 
 pub const PROGRESS_EVENT: &str = "zip://progress";
 pub const DROPPED_EVENT: &str = "zip://dropped";
@@ -135,7 +136,9 @@ pub fn create_archive_direct(
     let inputs = resolve_inputs(sandbox, &req.paths)?;
     planned_sources_in_scope(sandbox, &inputs)?;
     if inputs.iter().any(|item| {
-        path_eq(&dest, &item.abs_path) || (item.as_dir && stays_under(&dest, &item.abs_path))
+        path_eq(&dest, &item.abs_path)
+            || is_split_sibling(&dest, &item.abs_path)
+            || (item.as_dir && stays_under(&dest, &item.abs_path))
     }) {
         return Err(map_err(ZipcoreError::DestOverlapsInput {
             dest: dest.clone(),
@@ -144,13 +147,18 @@ pub fn create_archive_direct(
 
     let password = req.take_password()?;
     let encrypted = password.is_some();
+    if let Some(0) = req.split_bytes {
+        return Err(map_err(ZipcoreError::InvalidSplit {
+            reason: "0 バイトには分割できません".into(),
+        }));
+    }
     let tmp = TmpGuard(container_tmp_zip());
     let write_req = WriteRequest {
         inputs,
         dest: tmp.0.clone(),
         password,
         aes: AesMode::Aes256,
-        split_bytes: None,
+        split_bytes: req.split_bytes,
         replacements: req.replacements.clone(),
     };
     let report = write_zip(write_req, &mut progress, cancel).map_err(map_err)?;
@@ -170,7 +178,12 @@ pub fn create_archive_direct(
             return Err("暗号化ヘッダが不正です".into());
         }
     }
-    publish_tmp(&tmp.0, &dest).map_err(publish_err_ja)?;
+    let tmp_vols = zipcore::split::discover_volumes(&tmp.0);
+    let dest_vols = zipcore::split::final_volume_paths(&dest, tmp_vols.len() as u32);
+    for piece in &dest_vols {
+        sandbox.resolve_save_file(piece)?;
+    }
+    publish_tmp_set(&tmp_vols, &dest_vols).map_err(publish_err_ja)?;
     Ok(WriteReportDto::from(report).with_dest(&dest))
 }
 

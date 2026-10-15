@@ -1,8 +1,9 @@
-//! ZIP 作成（任意 AES-256 AE-2、非分割）。ファイル名は `encode_entry_name` の CP932 バイトのみ。
+//! ZIP 作成（任意 AES-256 AE-2、任意分割）。ファイル名は `encode_entry_name` の CP932 バイトのみ。
+//! 分割は出力ストリームの差し替えと、EOCD/CD のディスク番号だけ。非分割のヘッダ契約は変えない。
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -19,9 +20,10 @@ use crate::error::ZipcoreError;
 use crate::fsutil::{atomic_replace, path_eq, resolve_existing, resolve_path, stays_under};
 use crate::job::check_cancel;
 use crate::pkzip::{
-    inspect_zip, patch_local_sizes, write_central_header, write_eocd, write_local_header,
-    CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED, VERSION_NEEDED,
+    inspect_reader, inspect_zip, patch_local_sizes, write_central_header, write_eocd,
+    write_local_header, CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED, VERSION_NEEDED,
 };
+use crate::split::{self, is_split_sibling, SplitSink, SplitWriter};
 
 pub use crate::job::{Progress, ProgressPhase, SecretString};
 pub use crate::pkzip::InspectedEntry;
@@ -81,7 +83,15 @@ pub struct WriteReport {
 }
 
 pub fn inspect_zip_headers(path: &Path) -> Result<Vec<InspectedEntry>, ZipcoreError> {
-    inspect_zip(path)
+    let volumes = split::discover_volumes(path);
+    if volumes.len() <= 1 {
+        inspect_zip(path)
+    } else {
+        // inspect_reader は local_offset へ seek する。分割ではオフセットが
+        // ディスク相対なので、生連結バイトを渡すとローカルヘッダがずれる。
+        let data = split::linearize_volumes(path)?;
+        inspect_reader(&mut io::Cursor::new(data))
+    }
 }
 
 pub fn plan_write(req: &WriteRequest) -> Result<Plan, ZipcoreError> {
@@ -117,8 +127,10 @@ pub fn write_zip(
         }
     }
     let _ = req.aes;
-    if req.split_bytes.is_some() {
-        return Err(ZipcoreError::SplitNotImplemented);
+    if let Some(0) = req.split_bytes {
+        return Err(ZipcoreError::InvalidSplit {
+            reason: "0 バイトには分割できません".into(),
+        });
     }
 
     let plan = plan_write(&req)?;
@@ -140,10 +152,35 @@ pub fn write_zip(
             dest: req.dest.clone(),
         });
     }
+    if let Some(n) = req.split_bytes {
+        let extra = if req.password.is_some() {
+            aes_extra_field(METHOD_DEFLATE).len() as u64
+        } else {
+            0
+        };
+        let need = plan
+            .entries
+            .iter()
+            .map(|e| 30 + e.name_raw.len() as u64 + if e.is_dir { 0 } else { extra })
+            .max()
+            .unwrap_or(30);
+        if n < need {
+            return Err(ZipcoreError::InvalidSplit {
+                reason: format!("ヘッダ（{need} バイト）より小さい分割サイズは使えません"),
+            });
+        }
+    }
 
     let dest = req.dest.clone();
     let password = req.password.as_ref().map(SecretString::expose_bytes);
-    let report = write_plan_to_path(&plan, &dest, password, &mut progress, cancel)?;
+    let report = write_plan_to_path(
+        &plan,
+        &dest,
+        password,
+        req.split_bytes,
+        &mut progress,
+        cancel,
+    )?;
     progress(Progress {
         phase: ProgressPhase::Done,
         current_entry: None,
@@ -159,9 +196,13 @@ fn write_plan_to_path(
     plan: &Plan,
     dest: &Path,
     password: Option<&[u8]>,
+    split_bytes: Option<u64>,
     progress: &mut impl FnMut(Progress),
     cancel: &AtomicBool,
 ) -> Result<WriteReport, ZipcoreError> {
+    if let Some(n) = split_bytes {
+        return write_plan_split(plan, dest, password, n, progress, cancel);
+    }
     let partial = partial_path(dest);
     let result = write_plan_to_partial(plan, dest, &partial, password, progress, cancel);
     match result {
@@ -179,6 +220,35 @@ fn write_plan_to_path(
     }
 }
 
+fn write_plan_split(
+    plan: &Plan,
+    dest: &Path,
+    password: Option<&[u8]>,
+    split_bytes: u64,
+    progress: &mut impl FnMut(Progress),
+    cancel: &AtomicBool,
+) -> Result<WriteReport, ZipcoreError> {
+    let mut out = SplitWriter::create(dest.to_path_buf(), split_bytes)?;
+    match write_plan_into(&mut out, plan, dest, password, progress, cancel) {
+        Ok(report) => {
+            let pieces = out.finish()?;
+            split::discard_stale_volumes(dest, pieces.len() as u32);
+            Ok(report)
+        }
+        Err(e) => {
+            out.abort();
+            Err(map_split_write_err(e))
+        }
+    }
+}
+
+fn map_split_write_err(err: ZipcoreError) -> ZipcoreError {
+    match err {
+        ZipcoreError::Io(io) => split::map_split_io(io),
+        other => other,
+    }
+}
+
 fn write_plan_to_partial(
     plan: &Plan,
     dest: &Path,
@@ -188,6 +258,19 @@ fn write_plan_to_partial(
     cancel: &AtomicBool,
 ) -> Result<WriteReport, ZipcoreError> {
     let mut out = File::create(partial)?;
+    let report = write_plan_into(&mut out, plan, dest, password, progress, cancel)?;
+    out.sync_all()?;
+    Ok(report)
+}
+
+fn write_plan_into<W: SplitSink>(
+    out: &mut W,
+    plan: &Plan,
+    dest: &Path,
+    password: Option<&[u8]>,
+    progress: &mut impl FnMut(Progress),
+    cancel: &AtomicBool,
+) -> Result<WriteReport, ZipcoreError> {
     let mut centrals = Vec::with_capacity(plan.entries.len());
     let mut entries_done = 0u32;
     let mut bytes_done = 0u64;
@@ -205,7 +288,7 @@ fn write_plan_to_partial(
             bytes_total,
         });
         let rec = write_one_entry(
-            &mut out,
+            out,
             entry,
             password,
             cancel,
@@ -233,29 +316,34 @@ fn write_plan_to_partial(
         bytes_total,
     });
 
-    let cd_offset = out.stream_position()?;
-    if cd_offset > u32::MAX as u64 {
+    out.finish_on_last_piece();
+    let cd_disk = out.volume_index();
+    let cd_rel = out.offset_in_volume()?;
+    if cd_rel > u32::MAX as u64 {
         return Err(ZipcoreError::Zip64Required {
             reason: "中央ディレクトリのオフセットが 4 GiB を超えています".into(),
         });
     }
+    let cd_abs = out.stream_position()?;
     for rec in &centrals {
-        write_central_header(&mut out, rec)?;
+        write_central_header(out, rec)?;
     }
     let cd_end = out.stream_position()?;
-    let cd_size = cd_end - cd_offset;
+    let cd_size = cd_end - cd_abs;
     if cd_size > u32::MAX as u64 {
         return Err(ZipcoreError::Zip64Required {
             reason: "中央ディレクトリが 4 GiB を超えています".into(),
         });
     }
+    let this_disk = out.volume_index();
     write_eocd(
-        &mut out,
+        out,
         centrals.len() as u16,
         cd_size as u32,
-        cd_offset as u32,
+        cd_rel as u32,
+        this_disk,
+        cd_disk,
     )?;
-    out.sync_all()?;
 
     Ok(WriteReport {
         dest: dest.to_path_buf(),
@@ -265,8 +353,8 @@ fn write_plan_to_partial(
     })
 }
 
-fn write_one_entry(
-    out: &mut File,
+fn write_one_entry<W: SplitSink>(
+    out: &mut W,
     entry: &PlannedEntry,
     password: Option<&[u8]>,
     cancel: &AtomicBool,
@@ -289,7 +377,17 @@ fn write_one_entry(
         .map(crate::pkzip::msdos_datetime)
         .unwrap_or((0, (1 << 5) | 1));
 
-    let local_offset = out.stream_position()?;
+    let extra_len = if password.is_some() && !entry.is_dir {
+        aes_extra_field(METHOD_DEFLATE).len()
+    } else {
+        0
+    };
+    let header_len = 30u64 + entry.name_raw.len() as u64 + extra_len as u64;
+    out.ensure_record_fits(header_len)?;
+
+    let local_abs = out.stream_position()?;
+    let disk_start = out.volume_index();
+    let local_offset = out.offset_in_volume()?;
     if local_offset > u32::MAX as u64 {
         return Err(ZipcoreError::Zip64Required {
             reason: "ローカルヘッダのオフセットが 4 GiB を超えています".into(),
@@ -319,6 +417,7 @@ fn write_one_entry(
             compressed: 0,
             uncompressed: 0,
             local_offset: local_offset as u32,
+            disk_start,
             dos_time,
             dos_date,
             version_needed: VERSION_NEEDED,
@@ -396,13 +495,7 @@ fn write_one_entry(
         });
     }
     let crc = if encrypt { 0 } else { hasher.finalize() };
-    patch_local_sizes(
-        out,
-        local_offset,
-        crc,
-        compressed as u32,
-        uncompressed as u32,
-    )?;
+    patch_local_sizes(out, local_abs, crc, compressed as u32, uncompressed as u32)?;
     out.seek(SeekFrom::Start(data_end))?;
 
     Ok(CentralRecord {
@@ -414,6 +507,7 @@ fn write_one_entry(
         compressed: compressed as u32,
         uncompressed: uncompressed as u32,
         local_offset: local_offset as u32,
+        disk_start,
         dos_time,
         dos_date,
         version_needed,
@@ -645,7 +739,9 @@ fn dest_overlaps_input(dest: &Path, inputs: &[InputItem], plan: &Plan) -> bool {
     let dest = resolve_path(dest);
     inputs.iter().any(|item| {
         let input = resolve_existing(&item.abs_path);
-        path_eq(&dest, &input) || (item.as_dir && stays_under(&dest, &input))
+        path_eq(&dest, &input)
+            || is_split_sibling(&dest, &input)
+            || (item.as_dir && stays_under(&dest, &input))
     }) || plan
         .entries
         .iter()

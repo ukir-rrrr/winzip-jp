@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use zipcore::split::{self, is_split_sibling};
 use zipcore::{absolute, normalize_lexically, path_eq, resolve_path, stays_under};
 
 const TMP_PREFIX: &str = "winzip-jp-";
@@ -93,6 +94,8 @@ struct Grant {
     path: PathBuf,
     /// フォルダ選択 / フォルダドロップだけ true。保存先ファイルは false。
     recursive: bool,
+    /// `grant_save_dest` の ZIP。兄弟 `.zNN` の `resolve_save_file` はこれだけ。
+    save_dest: bool,
     #[cfg(target_os = "macos")]
     _access: Option<scoped::ScopedUrl>,
 }
@@ -116,7 +119,7 @@ impl Sandbox {
         }
         let stored = resolve_path(&abs);
         let recursive = stored.is_dir() || abs.is_dir();
-        self.insert(abs, stored, recursive);
+        self.insert(abs, stored, recursive, false);
         true
     }
 
@@ -133,13 +136,14 @@ impl Sandbox {
             return false;
         }
         let stored = resolve_path(&abs);
-        self.insert(abs, stored, false);
+        self.insert(abs, stored, false, true);
         true
     }
 
-    fn insert(&mut self, original: PathBuf, stored: PathBuf, recursive: bool) {
+    fn insert(&mut self, original: PathBuf, stored: PathBuf, recursive: bool, save_dest: bool) {
         if let Some(existing) = self.grants.iter_mut().find(|g| g.path == stored) {
             existing.recursive |= recursive;
+            existing.save_dest |= save_dest;
             return;
         }
         // startAccessing はダイアログ/ドロップの元パス。比較キーは canonicalize 後。
@@ -150,6 +154,7 @@ impl Sandbox {
         self.grants.push(Grant {
             path: stored,
             recursive,
+            save_dest,
             #[cfg(target_os = "macos")]
             _access: access,
         });
@@ -179,6 +184,13 @@ impl Sandbox {
             return Err("保存先がフォルダです".into());
         }
         if self.grants.iter().any(|g| g.path == resolved) {
+            return Ok(resolved);
+        }
+        if self
+            .grants
+            .iter()
+            .any(|g| g.save_dest && is_split_sibling(&g.path, &resolved))
+        {
             return Ok(resolved);
         }
         Err(format!(
@@ -213,6 +225,7 @@ impl Sandbox {
                 .map(|g| Grant {
                     path: g.path.clone(),
                     recursive: g.recursive,
+                    save_dest: g.save_dest,
                     #[cfg(target_os = "macos")]
                     _access: None,
                 })
@@ -254,6 +267,68 @@ pub fn is_container_tmp(path: &Path) -> bool {
     name.starts_with(TMP_PREFIX)
 }
 
+/// コンテナの分割ピースを、同じ stem の最終パスへ順に公開する。
+/// 失敗時は今回作った dest だけ消し、もともとあった dest は退避から戻す。
+pub fn publish_tmp_set(tmp_vols: &[PathBuf], dest_vols: &[PathBuf]) -> Result<(), PublishError> {
+    if tmp_vols.len() != dest_vols.len() || tmp_vols.is_empty() {
+        return Err(
+            io::Error::new(io::ErrorKind::InvalidInput, "分割ピースの数が合いません").into(),
+        );
+    }
+    let mut created: Vec<PathBuf> = Vec::new();
+    let mut backups: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for (tmp, dest) in tmp_vols.iter().zip(dest_vols.iter()) {
+        let backup = if dest.exists() {
+            let bak = container_tmp_zip();
+            if let Err(e) = fs::copy(dest, &bak) {
+                let _ = fs::remove_file(&bak);
+                rollback_publish_set(&created, &backups, tmp_vols);
+                return Err(e.into());
+            }
+            Some(bak)
+        } else {
+            None
+        };
+        match publish_tmp(tmp, dest) {
+            Ok(()) => {
+                if let Some(bak) = backup {
+                    backups.push((dest.clone(), bak));
+                } else {
+                    created.push(dest.clone());
+                }
+            }
+            Err(e) => {
+                if let Some(bak) = backup {
+                    let _ = fs::remove_file(&bak);
+                }
+                rollback_publish_set(&created, &backups, tmp_vols);
+                return Err(e);
+            }
+        }
+    }
+    for (_, bak) in backups {
+        let _ = fs::remove_file(bak);
+    }
+    if dest_vols.len() > 1 {
+        if let Some(dest) = dest_vols.last() {
+            split::discard_stale_volumes(dest, dest_vols.len() as u32);
+        }
+    }
+    Ok(())
+}
+
+fn rollback_publish_set(created: &[PathBuf], backups: &[(PathBuf, PathBuf)], tmp_vols: &[PathBuf]) {
+    for p in created {
+        let _ = fs::remove_file(p);
+    }
+    for (dest, bak) in backups {
+        let _ = restore_or_keep_backup(bak, dest);
+    }
+    for t in tmp_vols {
+        remove_tmp_file(t);
+    }
+}
+
 /// コンテナ tmp を fsync してからユーザー先へ rename（別ボリュームは copy+remove）。
 pub fn publish_tmp(tmp: &Path, dest: &Path) -> Result<(), PublishError> {
     if !is_container_tmp(tmp) {
@@ -270,7 +345,7 @@ pub fn publish_tmp(tmp: &Path, dest: &Path) -> Result<(), PublishError> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => publish_across_volumes(tmp, dest),
         Err(e) => {
-            discard_tmp(tmp);
+            remove_tmp_file(tmp);
             Err(e.into())
         }
     }
@@ -297,7 +372,7 @@ fn publish_across_volumes_with(
         let bak = container_tmp_zip();
         if let Err(e) = fs::copy(dest, &bak) {
             let _ = fs::remove_file(&bak);
-            discard_tmp(tmp);
+            remove_tmp_file(tmp);
             return Err(e.into());
         }
         Some(bak)
@@ -307,7 +382,7 @@ fn publish_across_volumes_with(
     match place(tmp, dest) {
         Ok(()) => {
             if let Err(e) = persist(dest) {
-                discard_tmp(tmp);
+                remove_tmp_file(tmp);
                 return match backup {
                     Some(bak) => Err(PublishError::BackupKept {
                         source: e,
@@ -319,7 +394,7 @@ fn publish_across_volumes_with(
                     }
                 };
             }
-            discard_tmp(tmp);
+            remove_tmp_file(tmp);
             if let Some(bak) = backup {
                 let _ = fs::remove_file(bak);
             }
@@ -328,10 +403,10 @@ fn publish_across_volumes_with(
         Err(e) => {
             if let Some(bak) = backup {
                 if restore_or_keep_backup(&bak, dest) {
-                    discard_tmp(tmp);
+                    remove_tmp_file(tmp);
                     Err(PublishError::Io(e))
                 } else {
-                    discard_tmp(tmp);
+                    remove_tmp_file(tmp);
                     Err(PublishError::BackupKept {
                         source: e,
                         backup: bak,
@@ -339,7 +414,7 @@ fn publish_across_volumes_with(
                 }
             } else {
                 let _ = fs::remove_file(dest);
-                discard_tmp(tmp);
+                remove_tmp_file(tmp);
                 Err(e.into())
             }
         }
@@ -361,11 +436,37 @@ fn restore_or_keep_backup(bak: &Path, dest: &Path) -> bool {
     true
 }
 
-pub fn discard_tmp(tmp: &Path) {
+/// 1 本のコンテナ一時ファイルだけ消す。`.zNN` に対して兄弟ピースは見ない。
+fn remove_tmp_file(tmp: &Path) {
+    if !is_container_tmp(tmp) {
+        return;
+    }
     let _ = fs::remove_file(tmp);
     let mut partial = tmp.as_os_str().to_os_string();
     partial.push(".partial");
     let _ = fs::remove_file(partial);
+}
+
+fn is_zip_ext(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+}
+
+/// 最後の `.zip` を渡す。同じ stem の分割ピースと `.partial` をまとめて消す。
+/// `.zNN` を渡しても兄弟は消さない（公開中の 1 ピース失敗でセットを壊さない）。
+/// `.z01` が先に公開済みでも、残りの `.zNN` は stem から列挙して消す。
+pub fn discard_tmp(tmp: &Path) {
+    if !is_container_tmp(tmp) {
+        return;
+    }
+    if is_zip_ext(tmp) {
+        for i in 1..=split::MAX_PIECES {
+            remove_tmp_file(&split::volume_path(tmp, i, false));
+        }
+        split::discard_partials_for(tmp);
+    }
+    remove_tmp_file(tmp);
 }
 
 #[cfg(test)]
@@ -614,12 +715,7 @@ mod tests {
             &tmp,
             &dest,
             |src, dst| fs::copy(src, dst).map(|_| ()),
-            |_| {
-                Err(io::Error::new(
-                    io::ErrorKind::StorageFull,
-                    "persist failed",
-                ))
-            },
+            |_| Err(io::Error::new(io::ErrorKind::StorageFull, "persist failed")),
         );
         assert!(err.is_err());
         assert!(!dest.exists());
@@ -649,6 +745,30 @@ mod tests {
         assert!(sandbox.resolve_save_file(&other_case).is_err());
         assert!(!sandbox.allows(&sibling));
         assert!(!sandbox.allows(&root));
+        let z01 = root.join("out.z01");
+        assert!(sandbox.resolve_save_file(&z01).is_ok());
+        assert!(!sandbox.allows(&z01));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dropped_file_does_not_unlock_split_siblings() {
+        let root = std::env::temp_dir().join(format!(
+            "winzip-jp-drop-sib-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let dropped = root.join("budget.xlsx");
+        fs::write(&dropped, b"x").unwrap();
+        let mut sandbox = Sandbox::new();
+        assert!(sandbox.grant(&dropped));
+        let z01 = root.join("budget.z01");
+        assert!(sandbox.resolve_save_file(&z01).is_err());
+        assert!(!sandbox.allows(&z01));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -671,5 +791,119 @@ mod tests {
         assert!(sandbox.grant_save_dest(&dest));
         assert!(sandbox.resolve_save_file(&dest).is_ok());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn publish_across_volumes_does_not_delete_other_tmp_volumes() {
+        let dest_root = std::env::temp_dir().join(format!(
+            "wzjp-xdev-split-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dest_root).unwrap();
+        let dest = dest_root.join("out.z01");
+        let tmp_zip = container_tmp_zip();
+        let tmp_z01 = split::volume_path(&tmp_zip, 1, false);
+        let tmp_z02 = split::volume_path(&tmp_zip, 2, false);
+        fs::write(&tmp_z01, b"1").unwrap();
+        fs::write(&tmp_z02, b"2").unwrap();
+        fs::write(&tmp_zip, b"3").unwrap();
+        publish_across_volumes(&tmp_z01, &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"1");
+        assert!(!tmp_z01.exists());
+        assert!(tmp_z02.exists(), "z02 must survive discarding z01");
+        assert!(tmp_zip.exists(), "last zip tmp must survive discarding z01");
+        discard_tmp(&tmp_zip);
+        assert!(!tmp_z02.exists());
+        assert!(!tmp_zip.exists());
+        let _ = fs::remove_dir_all(&dest_root);
+    }
+
+    #[test]
+    fn discard_tmp_on_z01_does_not_delete_sibling_volumes() {
+        let tmp_zip = container_tmp_zip();
+        let tmp_z01 = split::volume_path(&tmp_zip, 1, false);
+        let tmp_z02 = split::volume_path(&tmp_zip, 2, false);
+        fs::write(&tmp_z01, b"1").unwrap();
+        fs::write(&tmp_z02, b"2").unwrap();
+        fs::write(&tmp_zip, b"3").unwrap();
+        discard_tmp(&tmp_z01);
+        assert!(!tmp_z01.exists());
+        assert!(
+            tmp_z02.exists(),
+            "discard_tmp(.z01) must not expand siblings"
+        );
+        assert!(
+            tmp_zip.exists(),
+            "discard_tmp(.z01) must not delete last zip"
+        );
+        discard_tmp(&tmp_zip);
+        assert!(!tmp_z02.exists());
+        assert!(!tmp_zip.exists());
+    }
+
+    #[test]
+    fn publish_tmp_set_failure_restores_existing_z01() {
+        let dest_root = std::env::temp_dir().join(format!(
+            "wzjp-pubset-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dest_root).unwrap();
+        let dest_zip = dest_root.join("out.zip");
+        let dest_z01 = dest_root.join("out.z01");
+        let dest_z02 = dest_root.join("out.z02");
+        fs::write(&dest_z01, b"OLDZ01").unwrap();
+        fs::write(&dest_zip, b"OLDZIP").unwrap();
+        fs::create_dir(&dest_z02).unwrap();
+        let tmp_zip = container_tmp_zip();
+        let tmp_z01 = split::volume_path(&tmp_zip, 1, false);
+        let tmp_z02 = split::volume_path(&tmp_zip, 2, false);
+        fs::write(&tmp_z01, b"new1").unwrap();
+        fs::write(&tmp_z02, b"new2").unwrap();
+        fs::write(&tmp_zip, b"new3").unwrap();
+        assert!(publish_tmp_set(
+            &[tmp_z01, tmp_z02, tmp_zip],
+            &[dest_z01.clone(), dest_z02.clone(), dest_zip.clone()],
+        )
+        .is_err());
+        assert_eq!(fs::read(&dest_z01).unwrap(), b"OLDZ01");
+        assert_eq!(fs::read(&dest_zip).unwrap(), b"OLDZIP");
+        assert!(dest_z02.is_dir());
+        let _ = fs::remove_dir_all(&dest_root);
+    }
+
+    #[test]
+    fn publish_tmp_set_drops_stale_z_pieces() {
+        let dest_root = std::env::temp_dir().join(format!(
+            "wzjp-pubstale-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dest_root).unwrap();
+        let dest_zip = dest_root.join("out.zip");
+        let dest_z01 = dest_root.join("out.z01");
+        let dest_z02 = dest_root.join("out.z02");
+        fs::write(&dest_z01, b"OLD1").unwrap();
+        fs::write(&dest_z02, b"OLD2").unwrap();
+        fs::write(&dest_zip, b"OLDZIP").unwrap();
+        let tmp_zip = container_tmp_zip();
+        let tmp_z01 = split::volume_path(&tmp_zip, 1, false);
+        fs::write(&tmp_z01, b"new1").unwrap();
+        fs::write(&tmp_zip, b"newzip").unwrap();
+        publish_tmp_set(&[tmp_z01, tmp_zip], &[dest_z01.clone(), dest_zip.clone()]).unwrap();
+        assert_eq!(fs::read(&dest_z01).unwrap(), b"new1");
+        assert_eq!(fs::read(&dest_zip).unwrap(), b"newzip");
+        assert!(!dest_z02.exists());
+        let _ = fs::remove_dir_all(&dest_root);
     }
 }

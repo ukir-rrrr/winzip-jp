@@ -147,10 +147,18 @@ function Report-OptionalExtract {
     }
 }
 
-# AES ZIP: Explorer / tar / Shell.Application cannot open it and may hang
-# on a password prompt. Required path is 7-Zip only.
+# AES / split ZIP: Explorer / tar / Shell.Application cannot open them and
+# may hang (password prompt, or waiting for the next volume). Required path
+# is 7-Zip only.
+$zipDir = [System.IO.Path]::GetDirectoryName($ZipPath)
+$zipStem = [System.IO.Path]::GetFileNameWithoutExtension($ZipPath)
+$z01 = Join-Path $zipDir ($zipStem + '.z01')
+$isSplit = Test-Path -LiteralPath $z01
+
 if ($password) {
     Write-Host 'optional extractors skipped for password ZIP'
+} elseif ($isSplit) {
+    Write-Host 'optional extractors skipped for split ZIP'
 } else {
     $ExpandDir = Join-Path $WorkDir 'expand-archive'
     Report-OptionalExtract -Label 'Expand-Archive' -OutDir $ExpandDir -Extract {

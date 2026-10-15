@@ -37,6 +37,16 @@ fn unique_dir(label: &str) -> PathBuf {
     path
 }
 
+fn incompressible(n: usize) -> Vec<u8> {
+    let mut x = 0x9e3779b97f4a7c15u64;
+    (0..n)
+        .map(|_| {
+            x = x.wrapping_mul(0xbf58476d1ce4e5b9).wrapping_add(1);
+            (x >> 56) as u8
+        })
+        .collect()
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect()
 }
@@ -448,6 +458,58 @@ fn create_dest_inside_input_tree_needs_own_grant() {
 }
 
 #[test]
+fn create_rejects_split_sibling_as_input() {
+    let root = unique_dir("overlap-z");
+    let z01 = root.join("out.z01");
+    fs::write(&z01, b"old piece").unwrap();
+    let dest = root.join("out.zip");
+    let mut sandbox = Sandbox::new();
+    sandbox.grant(&z01);
+    sandbox.grant_save_dest(&dest);
+    let err = create_archive_direct(
+        &sandbox,
+        CreateDto {
+            paths: vec![z01.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+            ..Default::default()
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("出力先が入力"), "{err}");
+    assert_eq!(fs::read(&z01).unwrap(), b"old piece");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn create_rejects_split_sibling_ascii_case() {
+    let root = unique_dir("overlap-z-case");
+    let z01 = root.join("out.z01");
+    fs::write(&z01, b"old piece").unwrap();
+    let dest = root.join("OUT.zip");
+    let mut sandbox = Sandbox::new();
+    sandbox.grant(&z01);
+    sandbox.grant_save_dest(&dest);
+    let err = create_archive_direct(
+        &sandbox,
+        CreateDto {
+            paths: vec![z01.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+            ..Default::default()
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(err.contains("出力先が入力"), "{err}");
+    assert_eq!(fs::read(&z01).unwrap(), b"old piece");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn dest_inside_input_dir_is_rejected() {
     let root = unique_dir("dest-overlap");
     let src_dir = root.join("in");
@@ -540,6 +602,7 @@ fn create_with_password_sets_aes_flags() {
             paths: vec![src.to_string_lossy().into_owned()],
             replacements: Default::default(),
             password: Some("secret".into()),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -571,6 +634,7 @@ fn create_rejects_empty_password() {
             paths: vec![src.to_string_lossy().into_owned()],
             replacements: Default::default(),
             password: Some(String::new()),
+            ..Default::default()
         },
         dest.to_str().unwrap(),
         |_| {},
@@ -579,5 +643,63 @@ fn create_rejects_empty_password() {
     .unwrap_err();
     assert!(err.contains("パスワードを入力"), "{err}");
     assert!(!dest.exists());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn create_split_writes_z01_and_zip_with_cp932_names() {
+    let root = unique_dir("split");
+    let src = root.join("が.txt");
+    // 周期 256 の列は deflate で 512 未満に潰れる。分割ピースが要る入力にする。
+    fs::write(&src, incompressible(8000)).unwrap();
+    let dest = root.join("out.zip");
+    let mut sandbox = Sandbox::new();
+    sandbox.grant(&src);
+    sandbox.grant_save_dest(&dest);
+    let split_bytes = 512u64;
+    create_archive_direct(
+        &sandbox,
+        CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+            split_bytes: Some(split_bytes),
+            ..Default::default()
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .expect("split create");
+    let z01 = dest.with_file_name("out.z01");
+    assert!(z01.exists(), "z01 piece");
+    assert!(dest.exists(), "last zip piece");
+    assert!(fs::metadata(&z01).unwrap().len() <= split_bytes);
+    let headers = inspect_zip_headers(&dest).unwrap();
+    let file = headers
+        .iter()
+        .find(|e| e.name_raw.ends_with(b".txt"))
+        .unwrap();
+    assert_eq!(hex(&file.name_raw), "82AA2E747874");
+    assert_eq!(file.gpbf & EFS_UTF8_BIT, 0);
+    create_archive_direct(
+        &sandbox,
+        CreateDto {
+            paths: vec![src.to_string_lossy().into_owned()],
+            replacements: Default::default(),
+            ..Default::default()
+        },
+        dest.to_str().unwrap(),
+        |_| {},
+        &AtomicBool::new(false),
+    )
+    .expect("overwrite without split");
+    assert!(z01.exists(), "non-split must not delete neighbor z01");
+    let headers = inspect_zip_headers(&dest).unwrap();
+    let file = headers
+        .iter()
+        .find(|e| e.name_raw.ends_with(b".txt"))
+        .unwrap();
+    assert_eq!(hex(&file.name_raw), "82AA2E747874");
+    assert_eq!(file.gpbf & EFS_UTF8_BIT, 0);
     let _ = fs::remove_dir_all(&root);
 }

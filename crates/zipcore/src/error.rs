@@ -16,7 +16,9 @@ pub enum ZipcoreError {
     EmptyPassword,
     /// パスワードはあるが暗号化するファイルが無い（空フォルダのみ）。
     NoEncryptableFiles,
-    SplitNotImplemented,
+    InvalidSplit {
+        reason: String,
+    },
     Zip64Required {
         reason: String,
     },
@@ -78,8 +80,8 @@ impl fmt::Display for ZipcoreError {
             }
             Self::EmptyPassword => write!(f, "パスワードを入力してください"),
             Self::NoEncryptableFiles => write!(f, "パスワード付きにするファイルがありません"),
-            Self::SplitNotImplemented => {
-                write!(f, "分割 ZIP はこのバージョンではまだ作れません")
+            Self::InvalidSplit { reason } => {
+                write!(f, "分割サイズが不正です: {reason}")
             }
             Self::Zip64Required { reason } => {
                 write!(f, "ZIP64 が必要なため作成できません: {reason}")

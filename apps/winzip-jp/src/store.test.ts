@@ -19,6 +19,9 @@ afterEach(() => {
     encodingOverride: null,
     aesEnabled: false,
     password: "",
+    splitEnabled: false,
+    splitPresetMb: 10,
+    splitCustomMb: "",
     job: null,
     confirming: false,
     error: "",
@@ -483,6 +486,101 @@ describe("AES オプション", () => {
     await useAppStore.getState().createZip();
     assert.equal(sent, "パスワード");
     assert.equal(useAppStore.getState().password, "");
+  });
+});
+
+describe("分割オプション", () => {
+  it("既定はオフで splitBytes を送らない", async () => {
+    let sent: number | null | undefined = "unset" as unknown as number;
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        sent = req.splitBytes ?? null;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    assert.equal(useAppStore.getState().splitEnabled, false);
+    await useAppStore.getState().createZip();
+    assert.equal(sent, null);
+  });
+
+  it("10 MB プリセットをバイトで送る", async () => {
+    let sent: number | null | undefined;
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        sent = req.splitBytes ?? null;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setSplitEnabled(true);
+    await useAppStore.getState().createZip();
+    assert.equal(sent, 10 * 1024 * 1024);
+  });
+
+  it("任意サイズが空なら作成しない", async () => {
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setSplitEnabled(true);
+    useAppStore.getState().setSplitPresetMb("custom");
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().error, COPY.splitCustomNeed);
+    assert.equal(useAppStore.getState().job, null);
+  });
+
+  it("任意サイズが不正なら作成しない", async () => {
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setSplitEnabled(true);
+    useAppStore.getState().setSplitPresetMb("custom");
+    useAppStore.getState().setSplitCustomMb("1.5");
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().error, COPY.splitCustomInvalid);
+    assert.equal(useAppStore.getState().job, null);
+  });
+
+  it("任意サイズが Infinity になる値なら作成しない", async () => {
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setSplitEnabled(true);
+    useAppStore.getState().setSplitPresetMb("custom");
+    useAppStore.getState().setSplitCustomMb("1e308");
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().error, COPY.splitCustomInvalid);
+    assert.equal(useAppStore.getState().job, null);
   });
 });
 

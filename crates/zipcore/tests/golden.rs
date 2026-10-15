@@ -11,8 +11,8 @@ use std::sync::atomic::AtomicBool;
 use serde::Deserialize;
 use unicode_normalization::UnicodeNormalization;
 use zipcore::{
-    extract_zip, inspect_zip_headers, plan_write, write_zip, AesMode, ExtractRequest, InputItem,
-    SecretString, WriteRequest, EFS_UTF8_BIT,
+    discover_volumes, extract_zip, inspect_zip_headers, join_volumes_to, plan_write, write_zip,
+    AesMode, ExtractRequest, InputItem, SecretString, WriteRequest, EFS_UTF8_BIT,
 };
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +43,8 @@ struct Meta {
     empty_dirs: Vec<String>,
     #[serde(default)]
     extra_files: BTreeMap<String, String>,
+    #[serde(default)]
+    split_bytes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +94,7 @@ fn norm_hex(s: &str) -> String {
 struct Case {
     dir: PathBuf,
     expected: Expected,
+    meta: Meta,
 }
 
 fn load_cases() -> Vec<Case> {
@@ -111,7 +114,17 @@ fn load_cases() -> Vec<Case> {
         let text = fs::read_to_string(&expected_path).unwrap();
         let expected: Expected = serde_json::from_str(&text)
             .unwrap_or_else(|e| panic!("{}: {e}", expected_path.display()));
-        cases.push(Case { dir, expected });
+        let meta_path = dir.join("meta.json");
+        let meta: Meta = if meta_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap()
+        } else {
+            Meta::default()
+        };
+        cases.push(Case {
+            dir,
+            expected,
+            meta,
+        });
     }
     assert!(!cases.is_empty(), "golden cases missing");
     cases
@@ -187,7 +200,7 @@ fn write_case(case: &Case, payload: &Path, dest: &Path) -> zipcore::WriteReport 
             .as_ref()
             .map(|s| SecretString::new(s.as_str())),
         aes: AesMode::Aes256,
-        split_bytes: None,
+        split_bytes: case.meta.split_bytes,
         replacements: case.expected.replacements.clone(),
     };
     write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_or_else(|e| {
@@ -293,6 +306,10 @@ fn windows_extract_ps1_is_utf8_bom_ascii() {
         text.contains("optional extractors skipped for password ZIP"),
         "AES cases must skip Explorer/tar/Shell so the job cannot hang on a password prompt"
     );
+    assert!(
+        text.contains("optional extractors skipped for split ZIP"),
+        "split cases must skip Explorer/tar/Shell so the job cannot hang waiting for volumes"
+    );
 }
 
 #[test]
@@ -303,6 +320,70 @@ fn golden_headers_match_expected_json() {
         let zip = tmp.path().join("out.zip");
         let report = write_case(&case, &payload, &zip);
         assert_headers(&case, &zip);
+        if let Some(limit) = case.meta.split_bytes {
+            let volumes = discover_volumes(&zip);
+            assert!(
+                volumes.len() >= 2,
+                "{} expected split pieces, got {}",
+                case.dir.file_name().unwrap().to_string_lossy(),
+                volumes.len()
+            );
+            let sizes = zipcore::split::piece_sizes(&zip).unwrap();
+            for (i, size) in sizes.iter().enumerate() {
+                if i + 1 < sizes.len() {
+                    assert!(
+                        *size <= limit,
+                        "{} piece {i} is {size} > {limit}",
+                        case.dir.file_name().unwrap().to_string_lossy()
+                    );
+                }
+            }
+            assert!(
+                zipcore::split::eocd_in_last_volume(&zip).unwrap(),
+                "{} EOCD must be on the last .zip piece",
+                case.dir.file_name().unwrap().to_string_lossy()
+            );
+            let last_len = fs::metadata(&zip).unwrap().len();
+            let (this_disk, cd_disk, cd_size, cd_offset) =
+                zipcore::split::last_volume_eocd(&zip).unwrap();
+            assert_eq!(
+                this_disk as usize,
+                volumes.len() - 1,
+                "{} ThisDisk must be the last volume index",
+                case.dir.file_name().unwrap().to_string_lossy()
+            );
+            assert_eq!(cd_disk, this_disk);
+            assert!(
+                this_disk >= 1,
+                "{} 7-Zip ignores sibling .z01 when ThisDisk is 0",
+                case.dir.file_name().unwrap().to_string_lossy()
+            );
+            assert_eq!(
+                u64::from(cd_offset) + u64::from(cd_size) + 22,
+                last_len,
+                "{} CD offset must be relative to the last .zip piece",
+                case.dir.file_name().unwrap().to_string_lossy()
+            );
+            let last = fs::read(&zip).unwrap();
+            let cd = &last[cd_offset as usize..cd_offset as usize + cd_size as usize];
+            let mut i = 0usize;
+            while i + 46 <= cd.len() {
+                let name_len = u16::from_le_bytes(cd[i + 28..i + 30].try_into().unwrap()) as usize;
+                let extra_len = u16::from_le_bytes(cd[i + 30..i + 32].try_into().unwrap()) as usize;
+                let comment_len =
+                    u16::from_le_bytes(cd[i + 32..i + 34].try_into().unwrap()) as usize;
+                let disk = u16::from_le_bytes(cd[i + 34..i + 36].try_into().unwrap()) as usize;
+                let local = u32::from_le_bytes(cd[i + 42..i + 46].try_into().unwrap()) as u64;
+                let header_len = 30u64 + name_len as u64 + extra_len as u64;
+                let piece_len = fs::metadata(&volumes[disk]).unwrap().len();
+                assert!(
+                    local + header_len <= piece_len,
+                    "{} local header straddles volume {disk}",
+                    case.dir.file_name().unwrap().to_string_lossy()
+                );
+                i += 46 + name_len + extra_len + comment_len;
+            }
+        }
         let got_ex: HashSet<_> = report.excluded.into_iter().collect();
         let want_ex: HashSet<_> = case.expected.excluded.iter().cloned().collect();
         assert_eq!(
@@ -390,12 +471,19 @@ fn golden_extract_bytes_match_source() {
         let payload = tmp.path().join("payload");
         let zip = tmp.path().join("out.zip");
         write_case(&case, &payload, &zip);
+        let archive = if discover_volumes(&zip).len() > 1 {
+            let joined = tmp.path().join("joined.zip");
+            join_volumes_to(&zip, &joined).unwrap();
+            joined
+        } else {
+            zip.clone()
+        };
         let plan = plan_write(&WriteRequest {
             inputs: case_inputs(&payload),
             dest: zip.clone(),
             password: None,
             aes: AesMode::Aes256,
-            split_bytes: None,
+            split_bytes: case.meta.split_bytes,
             replacements: case.expected.replacements.clone(),
         })
         .unwrap_or_else(|e| panic!("{} plan: {e}", case.dir.display()));
@@ -403,7 +491,7 @@ fn golden_extract_bytes_match_source() {
         fs::create_dir_all(&dest).unwrap();
         extract_zip(
             ExtractRequest {
-                archive: zip,
+                archive,
                 dest: dest.clone(),
                 encoding: None,
                 overwrite: false,

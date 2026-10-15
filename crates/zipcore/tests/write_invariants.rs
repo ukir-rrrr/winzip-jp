@@ -391,28 +391,6 @@ fn empty_password_is_rejected() {
 }
 
 #[test]
-fn split_is_still_rejected() {
-    let tmp = support::TempDir::new();
-    let src = tmp.path().join("a.txt");
-    write_file(&src, b"a");
-    let req = WriteRequest {
-        inputs: vec![InputItem {
-            abs_path: src,
-            as_dir: false,
-        }],
-        dest: tmp.path().join("out.zip"),
-        password: None,
-        aes: AesMode::Aes256,
-        split_bytes: Some(1024),
-        replacements: BTreeMap::new(),
-    };
-    assert!(matches!(
-        write_zip(req, |_| {}, &AtomicBool::new(false)).unwrap_err(),
-        ZipcoreError::SplitNotImplemented
-    ));
-}
-
-#[test]
 fn aes_zip_sets_encrypt_bit_and_9901_and_keeps_cp932_names() {
     let tmp = support::TempDir::new();
     let src = tmp.path().join("src");
