@@ -18,7 +18,6 @@ export type Job = {
   kind: JobKind;
   progress: ProgressDto;
   dest: string | null;
-  epoch: number;
 };
 
 export type Sheet = "none" | "open" | "dismissed";
@@ -131,11 +130,9 @@ export const useAppStore = create<AppState>((set, get) => {
     run: (dest: string) => Promise<WriteReport | ExtractReport>,
     noDest: string,
   ): Promise<void> {
-    const epoch = get().epoch + 1;
-    set({
-      epoch,
+    const epoch = begin({
       error: "",
-      job: { kind, progress: startingProgress(), dest: null, epoch },
+      job: { kind, progress: startingProgress(), dest: null },
     });
     try {
       const dest = await pickDest();
@@ -155,7 +152,6 @@ export const useAppStore = create<AppState>((set, get) => {
           kind,
           dest: report.dest,
           progress: doneProgress(report.entriesWritten, report.bytesWritten),
-          epoch,
         },
       });
     } catch (err) {
@@ -192,7 +188,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     setProgress(progress) {
       const job = get().job;
-      if (!job || job.epoch !== get().epoch || progress.phase === "done") {
+      if (!job || job.progress.phase === "done" || progress.phase === "done") {
         return;
       }
       set({ job: { ...job, progress } });
@@ -308,6 +304,9 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async setEncoding(encoding) {
+      if (jobInFlight(get().job)) {
+        return;
+      }
       const archive = get().archivePath;
       const previous = get().encodingOverride;
       if (!archive) {
