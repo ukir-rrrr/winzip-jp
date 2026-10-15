@@ -39,6 +39,19 @@ describe("jaErr", () => {
     );
   });
 
+  it("does not pass EFS through as a known UI message", () => {
+    assert.equal(isKnownJaMessage("ファイル名の UTF-8 フラグが立っています"), true);
+    assert.equal(
+      jaErr(COPY.failed, new Error("ファイル名の UTF-8 フラグが立っています")).message,
+      "ファイル名の UTF-8 フラグが立っています",
+    );
+    assert.equal(isKnownJaMessage("ファイル名の UTF-8 フラグ（EFS）が立っています"), false);
+    assert.equal(
+      jaErr(COPY.failed, new Error("ファイル名の UTF-8 フラグ（EFS）が立っています")).message,
+      COPY.failed,
+    );
+  });
+
   it("rewrites CRC in zipcore corrupt messages", () => {
     assert.equal(
       toUiJa("ZIP が壊れています: a.txt の CRC が一致しません"),

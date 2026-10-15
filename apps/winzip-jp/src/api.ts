@@ -38,7 +38,7 @@ const KNOWN_JA_PREFIXES = [
   "保存先へ移せませんでした:",
   "シンボリックリンクは扱えません:",
   "スコープ外のパスです:",
-  "ファイル名の UTF-8 フラグ（EFS）が立っています",
+  "ファイル名の UTF-8 フラグが立っています",
   "展開先がフォルダではありません",
   "パスが不正です",
   "この場所にはアクセスできません:",
@@ -148,7 +148,11 @@ const tauriApi: ZipApi = {
     if (!hasTauri()) {
       return;
     }
-    await invoke("cancel_job");
+    try {
+      await invoke("cancel_job");
+    } catch (err) {
+      throw jaErr(COPY.failed, err);
+    }
   },
   async pickFiles() {
     if (!hasTauri()) {

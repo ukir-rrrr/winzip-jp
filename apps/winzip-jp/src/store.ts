@@ -421,7 +421,11 @@ export const useAppStore = create<AppState>((set, get) => {
 
     async cancel() {
       begin({ job: null, confirming: false, error: COPY.cancelled });
-      await getApi().cancelJob();
+      try {
+        await getApi().cancelJob();
+      } catch {
+        // 画面は既にキャンセル済み。Tauri の生エラーは出さない。
+      }
     },
 
     closeJob() {

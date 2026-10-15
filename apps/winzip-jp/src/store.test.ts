@@ -444,4 +444,31 @@ describe("展開エラー文言", () => {
     assert.equal(useAppStore.getState().error.includes("CRC"), false);
     assert.equal(useAppStore.getState().job, null);
   });
+
+  it("cancelJob の失敗で生の英語を出さない", async () => {
+    installApi({
+      async cancelJob() {
+        throw jaErr(COPY.failed, new Error("os error 2: No such file"));
+      },
+    });
+    useAppStore.setState({
+      confirming: false,
+      job: {
+        kind: "extract",
+        dest: null,
+        progress: {
+          phase: "writing",
+          currentEntry: null,
+          entriesDone: 0,
+          entriesTotal: 1,
+          bytesDone: 0,
+          bytesTotal: 1,
+        },
+      },
+      error: "",
+    });
+    await useAppStore.getState().cancel();
+    assert.equal(useAppStore.getState().error, COPY.cancelled);
+    assert.equal(useAppStore.getState().job, null);
+  });
 });
