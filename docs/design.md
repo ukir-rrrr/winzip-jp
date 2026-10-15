@@ -302,6 +302,21 @@ React は 3 画面だけ。
 
 状態は Zustand 1 ストア。Rust が返した DTO をそのまま持つ。エンコーディング判定を JS でやり直さない。
 
+#### UI ライブラリとテーマ
+
+UI ライブラリは **Mantine 最新安定版**（導入時点 9.7.x）。`@mantine/core` と `@mantine/hooks` だけを入れる。dates / charts / notifications / carousel などは使わない（バンドルサイズ）。コンポーネントは named import。CSS は使う部品に限定してよいが、Hello 時点は `@mantine/core/styles.css` 1 本で足りる。
+
+テーマは macOS / Finder に寄せる。
+
+| 項目 | 方針 |
+| --- | --- |
+| フォント | システムフォント。`-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif`。Web フォントを取らない |
+| カラー | `MantineProvider` の `defaultColorScheme="auto"` で OS のライト / ダークに追従。アクセントは macOS の `#007AFF` / `#0A84FF` |
+| 言語 | 日本語のみ。英語フォールバック文字列をコンポーネントに残さない。`html lang="ja"` |
+| 見た目 | ツールバーとドロップウェル。線や影で区切らず、面のトーン差。ルートに `data-ui` |
+
+UI を触るエージェントは taste-skill に従い、ブラウザまたは画面で確認する（`AGENTS.md`）。ランディング向けの方向抽選や写真フロアは適用しない。
+
 ### 2.6 依存 crate
 
 | crate | 用途 | 入れない理由があるもの |
@@ -655,12 +670,13 @@ codesign --entitlements Entitlements.plist --sign - winzip-jp.app
 
 ### 6.5 クラウドエージェント向け
 
-実装エージェントはローカルで GUI を目視しなくてよい。
+UI を変えたら taste-skill に従い、ブラウザまたは画面で確認する（`AGENTS.md`）。CI の受け入れは引き続き artifact の PNG と pixelmatch。
 
-1. 該当 S 番号の spec を足す / 通す
-2. PR の `ui-e2e` を待つ
-3. artifact の PNG を見てコピーとレイアウトを確認
-4. ベースライン差分 PR が必要なら別にする
+1. 画面をブラウザで操作し、ライト / ダークと作成 / 解凍を見る
+2. 該当 S 番号の spec を足す / 通す
+3. PR の `ui-e2e` を待つ
+4. artifact の PNG を見てコピーとレイアウトを確認
+5. ベースライン差分 PR が必要なら別にする
 
 ---
 
