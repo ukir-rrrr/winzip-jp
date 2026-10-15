@@ -186,14 +186,13 @@ export const useAppStore = create<AppState>((set, get) => {
     }
   }
 
-  function startCreate(replacements?: Record<string, string>): Promise<void> {
+  function startCreate(replacements: Record<string, string>): Promise<void> {
     const { dropped, plan } = get();
-    const names = replacements ?? get().replacements;
     return runJob(
       "create",
       () => getApi().pickSaveZip(destHint(plan, "archive.zip")),
       (dest) =>
-        getApi().createArchive({ paths: dropped, replacements: normalizeReplacements(names) }, dest),
+        getApi().createArchive({ paths: dropped, replacements: normalizeReplacements(replacements) }, dest),
       COPY.noDest,
     );
   }
@@ -291,7 +290,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     updateReplacement(relativePath, suggested) {
-      if (get().confirming) {
+      if (isBlocked()) {
         return;
       }
       const issues = get().plan?.issues ?? [];
@@ -307,7 +306,7 @@ export const useAppStore = create<AppState>((set, get) => {
       void getApi()
         .checkNames([normalizeReplacement(suggested)])
         .then((ok) => {
-          if (get().replacements[relativePath] !== suggested) {
+          if (isBlocked() || get().replacements[relativePath] !== suggested) {
             return;
           }
           if (!ok) {
@@ -368,7 +367,7 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ sheet: "open", error: COPY.needConfirm });
         return;
       }
-      await startCreate();
+      await startCreate({ ...get().replacements });
     },
 
     async setEncoding(encoding) {
