@@ -71,6 +71,8 @@ pub struct CentralRecord {
     pub compressed: u32,
     pub uncompressed: u32,
     pub local_offset: u32,
+    /// ローカルヘッダがあるディスク（0 始まり）。非分割は 0。
+    pub disk_start: u16,
     pub dos_time: u16,
     pub dos_date: u16,
     pub version_needed: u16,
@@ -157,7 +159,7 @@ pub fn write_central_header<W: Write>(w: &mut W, rec: &CentralRecord) -> io::Res
     w.write_all(&(rec.name.len() as u16).to_le_bytes())?;
     w.write_all(&(rec.extra.len() as u16).to_le_bytes())?;
     w.write_all(&0u16.to_le_bytes())?; // comment
-    w.write_all(&0u16.to_le_bytes())?; // disk
+    w.write_all(&rec.disk_start.to_le_bytes())?;
     w.write_all(&0u16.to_le_bytes())?; // internal attr
     w.write_all(&ext_attr.to_le_bytes())?;
     w.write_all(&rec.local_offset.to_le_bytes())?;
@@ -171,10 +173,12 @@ pub fn write_eocd<W: Write>(
     entry_count: u16,
     central_size: u32,
     central_offset: u32,
+    this_disk: u16,
+    cd_disk: u16,
 ) -> io::Result<()> {
     w.write_all(&SIG_EOCD.to_le_bytes())?;
-    w.write_all(&0u16.to_le_bytes())?; // this disk
-    w.write_all(&0u16.to_le_bytes())?; // cd disk
+    w.write_all(&this_disk.to_le_bytes())?;
+    w.write_all(&cd_disk.to_le_bytes())?;
     w.write_all(&entry_count.to_le_bytes())?;
     w.write_all(&entry_count.to_le_bytes())?;
     w.write_all(&central_size.to_le_bytes())?;

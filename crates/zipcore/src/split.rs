@@ -143,8 +143,136 @@ pub fn join_volumes(zip_path: &Path) -> io::Result<Vec<u8>> {
 }
 
 pub fn join_volumes_to(zip_path: &Path, dest: &Path) -> io::Result<()> {
-    let bytes = join_volumes(zip_path)?;
+    let bytes = linearize_volumes(zip_path)?;
     fs::write(dest, bytes)
+}
+
+/// 分割セットを単一 ZIP バイト列にする。マルチディスクならオフセットを連結座標へ直す。
+pub fn linearize_volumes(zip_path: &Path) -> io::Result<Vec<u8>> {
+    let volumes = discover_volumes(zip_path);
+    if volumes.len() <= 1 {
+        return fs::read(zip_path);
+    }
+    let mut sizes = Vec::with_capacity(volumes.len());
+    let mut data = Vec::new();
+    for p in &volumes {
+        let chunk = fs::read(p)?;
+        sizes.push(chunk.len());
+        data.extend_from_slice(&chunk);
+    }
+    linearize_concatenated(&mut data, &sizes)?;
+    Ok(data)
+}
+
+fn disk_prefix(sizes: &[usize], disk: u16) -> io::Result<u64> {
+    let idx = disk as usize;
+    if idx >= sizes.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "分割 ZIP のディスク番号がピース数を超えています",
+        ));
+    }
+    Ok(sizes.iter().take(idx).map(|n| *n as u64).sum())
+}
+
+fn linearize_concatenated(data: &mut [u8], sizes: &[usize]) -> io::Result<()> {
+    let Some(eocd) = find_eocd_end(data) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "EOCD が見つかりません",
+        ));
+    };
+    let this_disk = u16::from_le_bytes(data[eocd + 4..eocd + 6].try_into().unwrap());
+    let cd_disk = u16::from_le_bytes(data[eocd + 6..eocd + 8].try_into().unwrap());
+    if this_disk == 0 && cd_disk == 0 {
+        return Ok(());
+    }
+    let cd_entries = u16::from_le_bytes(data[eocd + 10..eocd + 12].try_into().unwrap()) as usize;
+    let cd_size = u32::from_le_bytes(data[eocd + 12..eocd + 16].try_into().unwrap()) as usize;
+    let cd_rel = u32::from_le_bytes(data[eocd + 16..eocd + 20].try_into().unwrap()) as u64;
+    let cd_abs = disk_prefix(sizes, cd_disk)? + cd_rel;
+    let mut i = cd_abs as usize;
+    for _ in 0..cd_entries {
+        if i + 46 > data.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "中央ディレクトリが途中で切れています",
+            ));
+        }
+        let disk_start = u16::from_le_bytes(data[i + 34..i + 36].try_into().unwrap());
+        let local_rel = u32::from_le_bytes(data[i + 42..i + 46].try_into().unwrap()) as u64;
+        let local_abs = disk_prefix(sizes, disk_start)? + local_rel;
+        if local_abs > u32::MAX as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "連結後のローカルオフセットが 4 GiB を超えています",
+            ));
+        }
+        data[i + 34..i + 36].copy_from_slice(&0u16.to_le_bytes());
+        data[i + 42..i + 46].copy_from_slice(&(local_abs as u32).to_le_bytes());
+        let name_len = u16::from_le_bytes(data[i + 28..i + 30].try_into().unwrap()) as usize;
+        let extra_len = u16::from_le_bytes(data[i + 30..i + 32].try_into().unwrap()) as usize;
+        let comment_len = u16::from_le_bytes(data[i + 32..i + 34].try_into().unwrap()) as usize;
+        i += 46 + name_len + extra_len + comment_len;
+    }
+    if i != cd_abs as usize + cd_size {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "中央ディレクトリのサイズが合いません",
+        ));
+    }
+    if cd_abs > u32::MAX as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "連結後の中央ディレクトリオフセットが 4 GiB を超えています",
+        ));
+    }
+    data[eocd + 4..eocd + 6].copy_from_slice(&0u16.to_le_bytes());
+    data[eocd + 6..eocd + 8].copy_from_slice(&0u16.to_le_bytes());
+    data[eocd + 16..eocd + 20].copy_from_slice(&(cd_abs as u32).to_le_bytes());
+    Ok(())
+}
+
+fn find_eocd_end(data: &[u8]) -> Option<usize> {
+    if data.len() < 22 {
+        return None;
+    }
+    let max_back = (data.len() - 22).min(65_535);
+    let start = data.len() - 22 - max_back;
+    let buf = &data[start..];
+    let last = buf.len() - 22;
+    for i in (0..=last).rev() {
+        let sig = u32::from_le_bytes(buf[i..i + 4].try_into().unwrap());
+        if sig != SIG_EOCD {
+            continue;
+        }
+        let comment_len = u16::from_le_bytes(buf[i + 20..i + 22].try_into().unwrap()) as usize;
+        if i + 22 + comment_len == buf.len() {
+            return Some(start + i);
+        }
+    }
+    None
+}
+
+/// 最後の `.zip` ピースの EOCD（this_disk, cd_disk, cd_size, cd_offset）。
+pub fn last_volume_eocd(zip_path: &Path) -> io::Result<(u16, u16, u32, u32)> {
+    let volumes = discover_volumes(zip_path);
+    let last = volumes
+        .last()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "分割ピースがありません"))?;
+    let data = fs::read(last)?;
+    let eocd = find_eocd_end(&data).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "最後の .zip に EOCD がありません",
+        )
+    })?;
+    Ok((
+        u16::from_le_bytes(data[eocd + 4..eocd + 6].try_into().unwrap()),
+        u16::from_le_bytes(data[eocd + 6..eocd + 8].try_into().unwrap()),
+        u32::from_le_bytes(data[eocd + 12..eocd + 16].try_into().unwrap()),
+        u32::from_le_bytes(data[eocd + 16..eocd + 20].try_into().unwrap()),
+    ))
 }
 
 /// 連結ストリームとして分割ピースを読む。
@@ -244,12 +372,25 @@ impl Seek for ConcatReader {
     }
 }
 
-/// 中央ディレクトリ以降は最後のピースに載せ、`split_bytes` を超えてよい。
-pub trait FinishOnLastPiece {
+/// 分割時は最後のピースに CD/EOCD を載せ、ディスク番号とディスク相対オフセットを書く。
+///
+/// 7-Zip（ZipIn.cpp `ReadVols`）は EOCD の `ThisDisk == 0` だと `.z01` を探さず、
+/// 最後の `.zip` だけを単体 ZIP として開く。非分割の `File` は disk = 0 のまま。
+pub trait SplitSink: Write + Seek {
     fn finish_on_last_piece(&mut self) {}
+    fn volume_index(&self) -> u16 {
+        0
+    }
+    fn offset_in_volume(&mut self) -> io::Result<u64> {
+        self.stream_position()
+    }
+    /// ローカルヘッダがピース境界をまたがないようにする。7-Zip はヘッダ跨ぎを Headers Error にする。
+    fn ensure_record_fits(&mut self, _len: u64) -> io::Result<()> {
+        Ok(())
+    }
 }
 
-impl FinishOnLastPiece for File {}
+impl SplitSink for File {}
 
 /// 論理オフセットをピースへ割り振る `Write + Seek`。
 pub struct SplitWriter {
@@ -382,9 +523,42 @@ fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
-impl FinishOnLastPiece for SplitWriter {
+impl SplitSink for SplitWriter {
     fn finish_on_last_piece(&mut self) {
         self.unbounded_last = true;
+    }
+
+    fn volume_index(&self) -> u16 {
+        if self.files.is_empty() {
+            return 0;
+        }
+        if self.unbounded_last && self.pos >= self.last_piece_start() {
+            return (self.files.len() - 1) as u16;
+        }
+        (self.pos / self.split_bytes) as u16
+    }
+
+    fn offset_in_volume(&mut self) -> io::Result<u64> {
+        if self.unbounded_last && !self.files.is_empty() && self.pos >= self.last_piece_start() {
+            return Ok(self.pos - self.last_piece_start());
+        }
+        Ok(self.pos % self.split_bytes)
+    }
+
+    fn ensure_record_fits(&mut self, len: u64) -> io::Result<()> {
+        if self.unbounded_last || len == 0 || len >= self.split_bytes {
+            return Ok(());
+        }
+        let off = self.pos % self.split_bytes;
+        if off == 0 {
+            return Ok(());
+        }
+        let room = self.split_bytes - off;
+        if room >= len {
+            return Ok(());
+        }
+        let pad = vec![0u8; room as usize];
+        self.write_all(&pad)
     }
 }
 
@@ -453,18 +627,14 @@ impl Drop for SplitWriter {
     }
 }
 
-/// 最後の `.zip` ファイルの末尾 22 バイトが EOCD か（7-Zip が分割セットと認識する条件）。
+/// 最後の `.zip` ファイルの末尾が EOCD か（コメントなしなら末尾 22 バイト）。
 pub fn eocd_in_last_volume(zip_path: &Path) -> io::Result<bool> {
     let volumes = discover_volumes(zip_path);
     let last = volumes
         .last()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "分割ピースがありません"))?;
     let data = fs::read(last)?;
-    if data.len() < 22 {
-        return Ok(false);
-    }
-    let sig = u32::from_le_bytes(data[data.len() - 22..data.len() - 18].try_into().unwrap());
-    Ok(sig == SIG_EOCD)
+    Ok(find_eocd_end(&data).is_some())
 }
 
 pub fn piece_sizes(zip_path: &Path) -> io::Result<Vec<u64>> {
@@ -561,6 +731,40 @@ mod tests {
         assert!(eocd_in_last_volume(&dest).unwrap());
         let z01 = fs::metadata(&pieces[0]).unwrap().len();
         assert!(z01 <= 16, "non-last piece {z01} > 16");
+        assert_eq!(pieces.len() - 1, 1);
+    }
+
+    #[test]
+    fn ensure_record_fits_starts_header_on_next_piece() {
+        let tmp = TempDir::new();
+        let dest = tmp.path().join("out.zip");
+        let mut w = SplitWriter::create(dest, 16).unwrap();
+        w.write_all(&[1u8; 10]).unwrap();
+        w.ensure_record_fits(8).unwrap();
+        assert_eq!(w.volume_index(), 1);
+        assert_eq!(w.offset_in_volume().unwrap(), 0);
+        w.write_all(&[9u8; 8]).unwrap();
+        let pieces = w.finish().unwrap();
+        assert_eq!(fs::metadata(&pieces[0]).unwrap().len(), 16);
+        let first = fs::read(&pieces[0]).unwrap();
+        assert_eq!(&first[..10], &[1u8; 10]);
+        assert_eq!(&first[10..], &[0u8; 6]);
+        assert_eq!(fs::read(&pieces[1]).unwrap(), vec![9u8; 8]);
+    }
+
+    #[test]
+    fn unbounded_volume_index_stays_on_last_piece() {
+        let tmp = TempDir::new();
+        let dest = tmp.path().join("out.zip");
+        let mut w = SplitWriter::create(dest, 16).unwrap();
+        w.write_all(&[1u8; 20]).unwrap();
+        w.finish_on_last_piece();
+        assert_eq!(w.volume_index(), 1);
+        assert_eq!(w.offset_in_volume().unwrap(), 4);
+        w.write_all(&[2u8; 22]).unwrap();
+        assert_eq!(w.volume_index(), 1);
+        assert_eq!(w.offset_in_volume().unwrap(), 26);
+        assert_eq!(w.piece_count(), 2);
     }
 
     #[test]

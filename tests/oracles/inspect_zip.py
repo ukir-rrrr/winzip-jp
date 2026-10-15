@@ -164,8 +164,56 @@ def compare(entries: list[dict], expected: dict) -> list[str]:
     return errors
 
 
+def _disk_base(sizes: list[int], disk: int) -> int:
+    if disk < 0 or disk >= len(sizes):
+        raise ValueError(f"disk {disk} out of range ({len(sizes)} volumes)")
+    return sum(sizes[:disk])
+
+
+def linearize_chunks(chunks: list[bytes]) -> bytes:
+    """マルチディスク分割なら CD/EOCD のオフセットを連結座標へ直す。
+
+    7-Zip は EOCD ThisDisk != 0 のとき .z01 を探す。検査は連結ストリームで
+    name_raw / gpbf を見るので、ディスク相対オフセットを足し直す。
+    """
+    if not chunks:
+        return b""
+    sizes = [len(c) for c in chunks]
+    data = bytearray(b"".join(chunks))
+    if len(chunks) == 1:
+        return bytes(data)
+    eocd = find_eocd(bytes(data))
+    this_disk = _u16(data, eocd + 4)
+    cd_disk = _u16(data, eocd + 6)
+    if this_disk == 0 and cd_disk == 0:
+        return bytes(data)
+    cd_entries = _u16(data, eocd + 10)
+    cd_size = _u32(data, eocd + 12)
+    cd_rel = _u32(data, eocd + 16)
+    cd_abs = _disk_base(sizes, cd_disk) + cd_rel
+    i = cd_abs
+    for _ in range(cd_entries):
+        if i + 46 > len(data) or _u32(data, i) != SIG_CENTRAL:
+            raise ValueError("broken central directory (split)")
+        disk_start = _u16(data, i + 34)
+        local_rel = _u32(data, i + 42)
+        new_off = _disk_base(sizes, disk_start) + local_rel
+        struct.pack_into("<H", data, i + 34, 0)
+        struct.pack_into("<I", data, i + 42, new_off)
+        name_len = _u16(data, i + 28)
+        extra_len = _u16(data, i + 30)
+        comment_len = _u16(data, i + 32)
+        i += 46 + name_len + extra_len + comment_len
+    if i != cd_abs + cd_size:
+        raise ValueError("central directory size mismatch")
+    struct.pack_into("<H", data, eocd + 4, 0)
+    struct.pack_into("<H", data, eocd + 6, 0)
+    struct.pack_into("<I", data, eocd + 16, cd_abs)
+    return bytes(data)
+
+
 def read_zip_bytes(path: Path) -> bytes:
-    """WinZip 分割 (stem.z01 … stem.zip) なら連結してから検査する。"""
+    """WinZip 分割 (stem.z01 … stem.zip) なら連結し、必要ならオフセットを直す。"""
     first = path.with_name(path.stem + ".z01")
     if not first.is_file():
         return path.read_bytes()
@@ -180,7 +228,7 @@ def read_zip_bytes(path: Path) -> bytes:
         if i > 999:
             break
     chunks.append(path.read_bytes())
-    return b"".join(chunks)
+    return linearize_chunks(chunks)
 
 
 def main(argv: list[str]) -> int:

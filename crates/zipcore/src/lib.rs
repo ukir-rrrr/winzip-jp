@@ -1,7 +1,7 @@
 //! Windows 向け ZIP のファイル名とフラグを自前で扱うコア。
 //!
 //! モジュール境界は `encoding` / `write` / `read` / `split`。
-//! `split` は作成の出力ストリームだけを差し替える。
+//! `split` は出力ストリームを差し替え、分割時だけディスク番号を書く。
 
 pub mod encoding;
 pub mod read;

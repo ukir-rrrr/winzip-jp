@@ -339,6 +339,46 @@ fn golden_headers_match_expected_json() {
                 "{} EOCD must be on the last .zip piece",
                 case.dir.file_name().unwrap().to_string_lossy()
             );
+            let last_len = fs::metadata(&zip).unwrap().len();
+            let (this_disk, cd_disk, cd_size, cd_offset) =
+                zipcore::split::last_volume_eocd(&zip).unwrap();
+            assert_eq!(
+                this_disk as usize,
+                volumes.len() - 1,
+                "{} ThisDisk must be the last volume index",
+                case.dir.file_name().unwrap().to_string_lossy()
+            );
+            assert_eq!(cd_disk, this_disk);
+            assert!(
+                this_disk >= 1,
+                "{} 7-Zip ignores sibling .z01 when ThisDisk is 0",
+                case.dir.file_name().unwrap().to_string_lossy()
+            );
+            assert_eq!(
+                u64::from(cd_offset) + u64::from(cd_size) + 22,
+                last_len,
+                "{} CD offset must be relative to the last .zip piece",
+                case.dir.file_name().unwrap().to_string_lossy()
+            );
+            let last = fs::read(&zip).unwrap();
+            let cd = &last[cd_offset as usize..cd_offset as usize + cd_size as usize];
+            let mut i = 0usize;
+            while i + 46 <= cd.len() {
+                let name_len = u16::from_le_bytes(cd[i + 28..i + 30].try_into().unwrap()) as usize;
+                let extra_len = u16::from_le_bytes(cd[i + 30..i + 32].try_into().unwrap()) as usize;
+                let comment_len =
+                    u16::from_le_bytes(cd[i + 32..i + 34].try_into().unwrap()) as usize;
+                let disk = u16::from_le_bytes(cd[i + 34..i + 36].try_into().unwrap()) as usize;
+                let local = u32::from_le_bytes(cd[i + 42..i + 46].try_into().unwrap()) as u64;
+                let header_len = 30u64 + name_len as u64 + extra_len as u64;
+                let piece_len = fs::metadata(&volumes[disk]).unwrap().len();
+                assert!(
+                    local + header_len <= piece_len,
+                    "{} local header straddles volume {disk}",
+                    case.dir.file_name().unwrap().to_string_lossy()
+                );
+                i += 46 + name_len + extra_len + comment_len;
+            }
         }
         let got_ex: HashSet<_> = report.excluded.into_iter().collect();
         let want_ex: HashSet<_> = case.expected.excluded.iter().cloned().collect();

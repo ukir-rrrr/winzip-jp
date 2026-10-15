@@ -1,9 +1,9 @@
 //! ZIP 作成（任意 AES-256 AE-2、任意分割）。ファイル名は `encode_entry_name` の CP932 バイトのみ。
-//! 分割は出力ストリームの差し替えだけ。非分割パスのヘッダ契約は変えない。
+//! 分割は出力ストリームの差し替えと、EOCD/CD のディスク番号だけ。非分割のヘッダ契約は変えない。
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -23,7 +23,7 @@ use crate::pkzip::{
     inspect_reader, inspect_zip, patch_local_sizes, write_central_header, write_eocd,
     write_local_header, CentralRecord, GPBF_PLAIN, METHOD_DEFLATE, METHOD_STORED, VERSION_NEEDED,
 };
-use crate::split::{self, FinishOnLastPiece, SplitWriter};
+use crate::split::{self, SplitSink, SplitWriter};
 
 pub use crate::job::{Progress, ProgressPhase, SecretString};
 pub use crate::pkzip::InspectedEntry;
@@ -87,8 +87,8 @@ pub fn inspect_zip_headers(path: &Path) -> Result<Vec<InspectedEntry>, ZipcoreEr
     if volumes.len() <= 1 {
         inspect_zip(path)
     } else {
-        let mut reader = split::ConcatReader::open(&volumes)?;
-        inspect_reader(&mut reader)
+        let data = split::linearize_volumes(path)?;
+        inspect_reader(&mut io::Cursor::new(data))
     }
 }
 
@@ -242,7 +242,7 @@ fn write_plan_to_partial(
     Ok(report)
 }
 
-fn write_plan_into<W: Write + Seek + FinishOnLastPiece>(
+fn write_plan_into<W: SplitSink>(
     out: &mut W,
     plan: &Plan,
     dest: &Path,
@@ -296,23 +296,33 @@ fn write_plan_into<W: Write + Seek + FinishOnLastPiece>(
     });
 
     out.finish_on_last_piece();
-    let cd_offset = out.stream_position()?;
-    if cd_offset > u32::MAX as u64 {
+    let cd_disk = out.volume_index();
+    let cd_rel = out.offset_in_volume()?;
+    if cd_rel > u32::MAX as u64 {
         return Err(ZipcoreError::Zip64Required {
             reason: "中央ディレクトリのオフセットが 4 GiB を超えています".into(),
         });
     }
+    let cd_abs = out.stream_position()?;
     for rec in &centrals {
         write_central_header(out, rec)?;
     }
     let cd_end = out.stream_position()?;
-    let cd_size = cd_end - cd_offset;
+    let cd_size = cd_end - cd_abs;
     if cd_size > u32::MAX as u64 {
         return Err(ZipcoreError::Zip64Required {
             reason: "中央ディレクトリが 4 GiB を超えています".into(),
         });
     }
-    write_eocd(out, centrals.len() as u16, cd_size as u32, cd_offset as u32)?;
+    let this_disk = out.volume_index();
+    write_eocd(
+        out,
+        centrals.len() as u16,
+        cd_size as u32,
+        cd_rel as u32,
+        this_disk,
+        cd_disk,
+    )?;
 
     Ok(WriteReport {
         dest: dest.to_path_buf(),
@@ -322,7 +332,7 @@ fn write_plan_into<W: Write + Seek + FinishOnLastPiece>(
     })
 }
 
-fn write_one_entry<W: Write + Seek>(
+fn write_one_entry<W: SplitSink>(
     out: &mut W,
     entry: &PlannedEntry,
     password: Option<&[u8]>,
@@ -346,7 +356,17 @@ fn write_one_entry<W: Write + Seek>(
         .map(crate::pkzip::msdos_datetime)
         .unwrap_or((0, (1 << 5) | 1));
 
-    let local_offset = out.stream_position()?;
+    let extra_len = if password.is_some() && !entry.is_dir {
+        aes_extra_field(METHOD_DEFLATE).len()
+    } else {
+        0
+    };
+    let header_len = 30u64 + entry.name_raw.len() as u64 + extra_len as u64;
+    out.ensure_record_fits(header_len)?;
+
+    let local_abs = out.stream_position()?;
+    let disk_start = out.volume_index();
+    let local_offset = out.offset_in_volume()?;
     if local_offset > u32::MAX as u64 {
         return Err(ZipcoreError::Zip64Required {
             reason: "ローカルヘッダのオフセットが 4 GiB を超えています".into(),
@@ -376,6 +396,7 @@ fn write_one_entry<W: Write + Seek>(
             compressed: 0,
             uncompressed: 0,
             local_offset: local_offset as u32,
+            disk_start,
             dos_time,
             dos_date,
             version_needed: VERSION_NEEDED,
@@ -453,13 +474,7 @@ fn write_one_entry<W: Write + Seek>(
         });
     }
     let crc = if encrypt { 0 } else { hasher.finalize() };
-    patch_local_sizes(
-        out,
-        local_offset,
-        crc,
-        compressed as u32,
-        uncompressed as u32,
-    )?;
+    patch_local_sizes(out, local_abs, crc, compressed as u32, uncompressed as u32)?;
     out.seek(SeekFrom::Start(data_end))?;
 
     Ok(CentralRecord {
@@ -471,6 +486,7 @@ fn write_one_entry<W: Write + Seek>(
         compressed: compressed as u32,
         uncompressed: uncompressed as u32,
         local_offset: local_offset as u32,
+        disk_start,
         dos_time,
         dos_date,
         version_needed,

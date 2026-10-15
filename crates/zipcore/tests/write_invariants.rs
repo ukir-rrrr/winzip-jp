@@ -97,6 +97,39 @@ fn assert_invariants(zip_path: &Path, src_names: &[(&str, bool)]) {
     }
 }
 
+fn assert_local_headers_fit_their_volume(zip_path: &Path) {
+    let volumes = zipcore::discover_volumes(zip_path);
+    let sizes: Vec<u64> = volumes
+        .iter()
+        .map(|p| fs::metadata(p).unwrap().len())
+        .collect();
+    let last = fs::read(volumes.last().unwrap()).unwrap();
+    let (_this_disk, _cd_disk, cd_size, cd_offset) =
+        zipcore::split::last_volume_eocd(zip_path).unwrap();
+    let cd = &last[cd_offset as usize..cd_offset as usize + cd_size as usize];
+    let mut i = 0usize;
+    while i + 46 <= cd.len() {
+        assert_eq!(&cd[i..i + 4], b"PK\x01\x02");
+        let name_len = u16::from_le_bytes(cd[i + 28..i + 30].try_into().unwrap()) as usize;
+        let extra_len = u16::from_le_bytes(cd[i + 30..i + 32].try_into().unwrap()) as usize;
+        let comment_len = u16::from_le_bytes(cd[i + 32..i + 34].try_into().unwrap()) as usize;
+        let disk = u16::from_le_bytes(cd[i + 34..i + 36].try_into().unwrap()) as usize;
+        let local = u32::from_le_bytes(cd[i + 42..i + 46].try_into().unwrap()) as u64;
+        let header_len = 30u64 + name_len as u64 + extra_len as u64;
+        assert!(disk < sizes.len(), "disk {disk} >= {}", sizes.len());
+        assert!(
+            local + header_len <= sizes[disk],
+            "local header straddles volume {disk}: off={local} hdr={header_len} size={}",
+            sizes[disk]
+        );
+        let piece = fs::read(&volumes[disk]).unwrap();
+        let off = local as usize;
+        let sig = u32::from_le_bytes(piece[off..off + 4].try_into().unwrap());
+        assert_eq!(sig, 0x0403_4b50, "local header missing on volume {disk}");
+        i += 46 + name_len + extra_len + comment_len;
+    }
+}
+
 fn extra_has(extra: &[u8], id: u16) -> bool {
     let mut i = 0;
     while i + 4 <= extra.len() {
@@ -777,6 +810,13 @@ fn split_pieces_stay_within_limit_and_cd_ends_on_zip() {
         }
     }
     assert!(zipcore::split::eocd_in_last_volume(&dest).unwrap());
+    let last_len = fs::metadata(&dest).unwrap().len();
+    let (this_disk, cd_disk, cd_size, cd_offset) = zipcore::split::last_volume_eocd(&dest).unwrap();
+    assert_eq!(this_disk as usize, volumes.len() - 1);
+    assert_eq!(cd_disk, this_disk);
+    assert!(this_disk >= 1, "7-Zip skips .z01 when ThisDisk is 0");
+    assert_eq!(u64::from(cd_offset) + u64::from(cd_size) + 22, last_len);
+    assert_local_headers_fit_their_volume(&dest);
     assert_invariants(&dest, &[("が.txt", false), ("blob.bin", false)]);
     let entries = inspect_zip_headers(&dest).unwrap();
     let ga = entries
@@ -873,6 +913,7 @@ fn split_with_password_keeps_cp932_and_encrypt_bit() {
     write_zip(req, |_| {}, &AtomicBool::new(false)).expect("split+aes");
     let volumes = zipcore::discover_volumes(&dest);
     assert!(volumes.len() >= 2);
+    assert_local_headers_fit_their_volume(&dest);
     let entries = inspect_zip_headers(&dest).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name_raw, encode_entry_name("が.txt").cp932);
