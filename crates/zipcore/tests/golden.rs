@@ -306,6 +306,10 @@ fn windows_extract_ps1_is_utf8_bom_ascii() {
         text.contains("optional extractors skipped for password ZIP"),
         "AES cases must skip Explorer/tar/Shell so the job cannot hang on a password prompt"
     );
+    assert!(
+        text.contains("optional extractors skipped for split ZIP"),
+        "split cases must skip Explorer/tar/Shell so the job cannot hang waiting for volumes"
+    );
 }
 
 #[test]
