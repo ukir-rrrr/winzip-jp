@@ -162,6 +162,10 @@ describe("画面 S1–S10", () => {
     await expect(input).toBeDisplayed();
     await expect(pick).toBeDisplayed();
     await expect($("[data-testid='aes-password-toggle']")).toHaveText("表示");
+    await expect($("[data-testid='aes-password-toggle']")).toHaveAttribute(
+      "aria-label",
+      "パスワードを表示",
+    );
     const layout = await browser.execute(() => {
       const field = document.querySelector("[data-testid='aes-password']");
       const button = document.querySelector("[data-testid='btn-pick-files']");

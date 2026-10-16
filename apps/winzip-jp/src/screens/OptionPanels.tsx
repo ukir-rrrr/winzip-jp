@@ -52,7 +52,7 @@ export function OptionPanels({
                 data-testid="aes-password-toggle"
                 aria-controls="aes-password"
                 aria-pressed={passwordVisible}
-                aria-label={passwordVisible ? COPY.hidePassword : COPY.showPassword}
+                aria-label={COPY.showPasswordLabel}
                 onClick={() => setPasswordVisible((open) => !open)}
               >
                 {passwordVisible ? COPY.hidePassword : COPY.showPassword}

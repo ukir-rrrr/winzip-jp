@@ -42,7 +42,8 @@ export const cssVariablesResolver: CSSVariablesResolver = (resolved) => ({
     "--app-accent": resolved.colors.macos[5],
     "--app-track": "#e4e4e8",
     "--app-tab": "#fbfbfd",
-    "--app-field": "#fbfbfd",
+    "--app-field": "#ffffff",
+    "--app-field-edge": "#6e6e73",
   },
   dark: {
     "--app-canvas": "#1c1c1e",
@@ -55,5 +56,6 @@ export const cssVariablesResolver: CSSVariablesResolver = (resolved) => ({
     "--app-track": "#3a3a3c",
     "--app-tab": "#48484a",
     "--app-field": "#1c1c1e",
+    "--app-field-edge": "#98989d",
   },
 });

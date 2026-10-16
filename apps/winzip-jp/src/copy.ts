@@ -50,6 +50,7 @@ export const COPY = {
   aesPlaceholder: "パスワード",
   showPassword: "表示",
   hidePassword: "隠す",
+  showPasswordLabel: "パスワードを表示",
   emptyPassword: "パスワードを入力してください",
   splitOption: "分割",
   splitSwitch: "分割",

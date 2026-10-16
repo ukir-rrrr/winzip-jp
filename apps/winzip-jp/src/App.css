@@ -442,7 +442,7 @@ body,
   width: 100%;
   height: 34px;
   padding: 0 10px;
-  border: 0;
+  border: 1px solid var(--app-field-edge);
   border-radius: 8px;
   background: var(--app-field);
   color: var(--app-ink);
@@ -462,6 +462,7 @@ body,
   flex: 0 0 auto;
   height: 34px;
   padding: 0 12px;
+  border: 1px solid var(--app-field-edge);
   border-radius: 8px;
   background: var(--app-tab);
   color: var(--app-ink);
