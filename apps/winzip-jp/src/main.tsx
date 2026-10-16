@@ -9,6 +9,7 @@ import "@mantine/core/styles/global.css";
 import "@mantine/core/styles/UnstyledButton.css";
 import "@mantine/core/styles/Title.css";
 import "@mantine/core/styles/Text.css";
+import "@mantine/core/styles/Alert.css";
 
 async function boot() {
   if (import.meta.env.VITE_E2E === "1") {

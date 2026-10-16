@@ -374,8 +374,14 @@ body,
   color: var(--app-muted);
 }
 
-[data-ui] .option-banners {
+[data-ui] .option-stack {
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+[data-ui] .option-banners {
   display: grid;
   grid-template-columns: 1fr;
   gap: 10px;
@@ -397,6 +403,61 @@ body,
   padding: 12px 14px;
   border-radius: 12px;
   background: var(--app-toolbar);
+}
+
+[data-ui] .compat-alert {
+  --alert-color: #b45309;
+  --alert-bd: transparent;
+  --alert-bg: #fbf3db;
+  color: #7a4b00;
+  padding: 10px 12px;
+}
+
+:root[data-mantine-color-scheme="dark"] [data-ui] .compat-alert {
+  --alert-color: #fbbf24;
+  --alert-bg: #3a2f14;
+  color: #fde68a;
+}
+
+[data-ui] .compat-alert-title {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: inherit;
+}
+
+[data-ui] .compat-hint {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+[data-ui] .compat-skip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--app-muted);
+}
+
+[data-ui] .compat-reminder {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: var(--app-ink);
+}
+
+[data-ui] .content:has(.option-stack) .work-pane {
+  min-height: 220px;
+}
+
+[data-ui] .content:has(.compat-alert) .file-list {
+  max-height: 72px;
+}
+
+[data-ui] .content:has(.option-stack) .dropzone-shell {
+  min-height: 220px;
 }
 
 [data-ui] .aes-warning {

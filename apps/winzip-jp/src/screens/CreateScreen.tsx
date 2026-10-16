@@ -1,5 +1,6 @@
 import { UnstyledButton } from "@mantine/core";
 import { COPY } from "../copy";
+import { CompatNotice } from "./CompatNotice";
 import { EmptyWell, ErrorNote } from "./shared";
 import type { PlanDto } from "../types";
 
@@ -10,6 +11,8 @@ export function CreateScreen({
   onCreate,
   onReset,
   canCreate,
+  aesEnabled,
+  splitEnabled,
 }: {
   plan: PlanDto | null;
   error: string;
@@ -17,6 +20,8 @@ export function CreateScreen({
   onCreate: () => void;
   onReset: () => void;
   canCreate: boolean;
+  aesEnabled: boolean;
+  splitEnabled: boolean;
 }) {
   if (!plan) {
     return (
@@ -29,6 +34,9 @@ export function CreateScreen({
 
   return (
     <div className="work-pane" data-testid="create-list">
+      {aesEnabled || splitEnabled ? (
+        <CompatNotice password={aesEnabled} split={splitEnabled} />
+      ) : null}
       <p className="work-count">{COPY.fileCount(plan.entries.length)}</p>
       <ul className="file-list" data-testid="file-list">
         {plan.entries.map((name) => (

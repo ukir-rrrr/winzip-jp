@@ -1,11 +1,13 @@
 import { installApi, jaErr, resetApi } from "../api";
 import { COPY } from "../copy";
+import { COMPAT_SKIP_STORAGE_KEY } from "../compatSkip";
 import { GUIDE_STORAGE_KEY } from "../guide";
 import { useAppStore } from "../store";
 import { E2E_CREATE_DEST, E2E_EXTRACT_DEST, S2_PLAN, S3_PLAN, S6_LIST, S7_LIST } from "./scenes";
 import type { ListReport, NameEncoding, PlanDto, WriteReport, ZipApi } from "../types";
 
 function syncGuide(scene: string | null): void {
+  localStorage.removeItem(COMPAT_SKIP_STORAGE_KEY);
   if (scene === "guide") {
     localStorage.removeItem(GUIDE_STORAGE_KEY);
     return;
@@ -28,6 +30,7 @@ export type E2eApi = {
 function mockApi(
   plan: PlanDto | null,
   listFor: (encoding: NameEncoding | null) => ListReport | null,
+  resolveCreate = false,
 ): Partial<ZipApi> {
   return {
     async planArchive() {
@@ -46,6 +49,14 @@ function mockApi(
       return E2E_EXTRACT_DEST;
     },
     createArchive(_req, dest) {
+      if (resolveCreate) {
+        return Promise.resolve<WriteReport>({
+          dest,
+          entriesWritten: 1,
+          bytesWritten: 1,
+          excluded: [],
+        });
+      }
       return new Promise<WriteReport>(() => {
         void dest;
       });
@@ -97,6 +108,11 @@ async function loadScene(id: string): Promise<void> {
     store.setMode("extract");
     installApi(mockApi(null, (encoding) => (encoding === "utf8" ? S7_LIST : S6_LIST)));
     await store.ingestDropped(["/tmp/e2e/cp932-typical.zip"]);
+    return;
+  }
+  if (id === "s9d") {
+    installApi(mockApi(S2_PLAN, () => null, true));
+    await store.ingestDropped(["/tmp/e2e/03-junk"]);
     return;
   }
   if (id === "crc") {

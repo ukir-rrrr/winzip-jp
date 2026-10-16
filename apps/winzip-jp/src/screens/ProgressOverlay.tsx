@@ -14,12 +14,16 @@ export function ProgressOverlay({
   progress,
   job,
   dest,
+  usedPassword = false,
+  usedSplit = false,
   onCancel,
   onClose,
 }: {
   progress: ProgressDto;
   job: JobKind;
   dest: string | null;
+  usedPassword?: boolean;
+  usedSplit?: boolean;
   onCancel: () => void;
   onClose: () => void;
 }) {
@@ -52,6 +56,11 @@ export function ProgressOverlay({
       {dest ? (
         <p className="progress-dest" data-testid={job === "extract" ? "extract-dest" : "create-dest"}>
           {dest}
+        </p>
+      ) : null}
+      {done && (usedPassword || usedSplit) ? (
+        <p className="compat-reminder" data-testid="compat-reminder">
+          {usedPassword ? COPY.compatCreatedReminder : COPY.compatSplitCreatedReminder}
         </p>
       ) : null}
       {done ? (
