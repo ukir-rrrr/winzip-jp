@@ -48,7 +48,7 @@ export function OptionPanels({
               />
               <UnstyledButton
                 type="button"
-                className="aes-reveal"
+                className={passwordVisible ? "aes-reveal is-on" : "aes-reveal"}
                 data-testid="aes-password-toggle"
                 aria-controls="aes-password"
                 aria-pressed={passwordVisible}
