@@ -33,6 +33,9 @@ describe("画面 S1–S10", () => {
     const body = await $("body").getText();
     expect(body).toContain("Windows で開ける形式（CP932）で保存します");
     expect(body).not.toContain("Windows のエクスプローラーでは開けません");
+    expect(body).not.toContain("Windows 標準では開けません");
+    await expect($("[data-testid='aes-toggle']")).toHaveAttribute("aria-checked", "false");
+    await expect($("[data-testid='split-toggle']")).toHaveAttribute("aria-checked", "false");
     await shot("s1");
   });
 
@@ -115,8 +118,9 @@ describe("画面 S1–S10", () => {
     await shot("s8");
   });
 
-  it("S9 AES オプション: エクスプローラー警告", async () => {
-    await openScene();
+  it("S9 AES オプション: 作成ボタン近くの警告", async () => {
+    await openScene("s2");
+    await expect($("[data-testid='aes-toggle']")).toHaveAttribute("aria-checked", "false");
     await $("[data-testid='aes-toggle']").click();
     await expect($("[data-testid='aes-toggle']")).toHaveAttribute("aria-checked", "true");
     await expect($("[data-testid='aes-toggle']")).toHaveAttribute(
@@ -124,28 +128,30 @@ describe("画面 S1–S10", () => {
       "ZIP にパスワードを付けます。エクスプローラーでは開けません。",
     );
     await expect($("[data-testid='aes-password']")).toBeDisplayed();
-    await expect($("[data-testid='aes-warning']")).toHaveText(
-      "パスワード付き ZIP は、Windows のエクスプローラーでは開けません。7-Zip などが必要です。",
-    );
+    const alert = $("[data-testid='aes-warning']");
+    await expect(alert).toBeDisplayed();
+    const text = await alert.getText();
+    expect(text).toContain("相手が 7-Zip などを持っていないと開けません（Windows 標準では開けません）");
+    expect(text).toContain("相手が Windows 標準で開くなら、パスワードはオフにしてください");
     const body = await $("body").getText();
-    expect(body).toContain("Windows のエクスプローラーでは開けません");
     expect(body).toContain("先方も UTF-8 前提のツールに限ります");
     await shot("s9");
   });
 
-  it("S9b 分割オプション: エクスプローラー警告", async () => {
-    await openScene();
+  it("S9b 分割オプション: 作成ボタン近くの警告", async () => {
+    await openScene("s2");
     await $("[data-testid='split-toggle']").click();
     await expect($("[data-testid='split-toggle']")).toHaveAttribute("aria-checked", "true");
     await expect($("[data-testid='split-toggle']")).toHaveAttribute(
       "title",
       "指定サイズで分けます。エクスプローラーでは開けません。",
     );
-    await expect($("[data-testid='split-warning']")).toHaveText(
-      "分割した ZIP もエクスプローラーでは開けません。",
-    );
+    const alert = $("[data-testid='split-warning']");
+    await expect(alert).toBeDisplayed();
+    const text = await alert.getText();
+    expect(text).toContain("分割した ZIP は Windows 標準では開けません。7-Zip などが必要です。");
+    expect(text).toContain("相手が Windows 標準で開くなら、分割はオフにしてください");
     const body = await $("body").getText();
-    expect(body).toContain("分割した ZIP もエクスプローラーでは開けません。");
     expect(body).toContain("8 MB");
     expect(body).toContain("10 MB");
     expect(body).toContain("25 MB");
@@ -153,10 +159,34 @@ describe("画面 S1–S10", () => {
     await shot("s9b");
   });
 
+  it("S9d パスワード付き作成の確認", async () => {
+    await openScene("s9d");
+    await $("[data-testid='aes-toggle']").click();
+    await $("[data-testid='aes-password']").setValue("秘密");
+    await $("[data-testid='btn-create']").click();
+    const modal = $("[data-testid='compat-confirm']");
+    await expect(modal).toBeDisplayed();
+    const text = await modal.getText();
+    expect(text).toContain("相手が 7-Zip などを持っていないと開けません（Windows 標準では開けません）");
+    expect(text).toContain("相手が Windows 標準で開くなら、パスワードはオフにしてください");
+    expect(text).toContain("このまま作成");
+    expect(text).toContain("パスワードなしで作成");
+    expect(text).toContain("次回から表示しない");
+    await shot("s9d");
+    await $("[data-testid='btn-create-anyway']").click();
+    await $("[data-testid='compat-reminder']").waitForDisplayed();
+    await expect($("[data-testid='compat-reminder']")).toHaveText(
+      "受け取る人に 7-Zip が必要と伝えてください",
+    );
+  });
+
   it("S9c パスワードと分割を同時に開く: 入力が見え、選ぶボタンは隠れない", async () => {
     await openScene();
     await $("[data-testid='aes-toggle']").click();
     await $("[data-testid='split-toggle']").click();
+    const both = await $("[data-testid='aes-warning']").getText();
+    expect(both).toContain("相手が 7-Zip などを持っていないと開けません（Windows 標準では開けません）");
+    expect(both).toContain("相手が Windows 標準で開くなら、分割はオフにしてください");
     const input = $("[data-testid='aes-password']");
     const pick = $("[data-testid='btn-pick-files']");
     await expect(input).toBeDisplayed();
@@ -199,6 +229,9 @@ describe("画面 S1–S10", () => {
     });
     expect(layout.ok).toBe(true);
     await browser.execute(() => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
       document.querySelector("[data-testid='content']")?.scrollTo(0, 0);
     });
     await shot("s9c");

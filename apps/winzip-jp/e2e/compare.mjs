@@ -8,7 +8,7 @@ import { PNG } from "pngjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)));
 const artifacts = resolve(root, "artifacts");
 const baselines = resolve(root, "baselines");
-const ids = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9c", "s10"];
+const ids = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s9c", "s9d", "s10"];
 
 // ツールバーと余白を除いたコンテンツ領域。信号ボタンはここに入らない。
 const CROP = { x: 22, y: 64, width: 756, height: 514 };

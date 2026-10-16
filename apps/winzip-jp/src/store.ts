@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { getApi } from "./api";
+import { readCompatSkip, writeCompatSkip } from "./compatSkip";
 import { COPY } from "./copy";
 import {
   defaultReplacements,
@@ -25,6 +26,8 @@ export type Job = {
   kind: JobKind;
   progress: ProgressDto;
   dest: string | null;
+  usedPassword: boolean;
+  usedSplit: boolean;
 };
 
 export type Sheet = "none" | "open" | "dismissed";
@@ -45,6 +48,7 @@ export type AppState = {
   splitCustomMb: string;
   job: Job | null;
   confirming: boolean;
+  compatConfirm: boolean;
   epoch: number;
   error: string;
   setMode: (mode: Mode) => void;
@@ -55,6 +59,7 @@ export type AppState = {
   updateReplacement: (relativePath: string, suggested: string) => void;
   dismissSheet: () => void;
   confirmAndCreate: () => Promise<void>;
+  confirmCompat: (keepPassword: boolean, skipNext: boolean) => Promise<void>;
   createZip: () => Promise<void>;
   setAesEnabled: (on: boolean) => void;
   setPassword: (password: string) => void;
@@ -135,6 +140,7 @@ const emptyWork = {
   encodingOverride: null as NameEncoding | null,
   job: null as Job | null,
   confirming: false,
+  compatConfirm: false,
   error: "",
 };
 
@@ -142,7 +148,7 @@ export const useAppStore = create<AppState>((set, get) => {
   const live = (epoch: number) => get().epoch === epoch;
 
   function isBlocked(): boolean {
-    return jobInFlight(get().job) || get().confirming;
+    return jobInFlight(get().job) || get().confirming || get().compatConfirm;
   }
 
   function begin(patch: Partial<AppState>): number {
@@ -156,10 +162,14 @@ export const useAppStore = create<AppState>((set, get) => {
     pickDest: () => Promise<string | null>,
     run: (dest: string) => Promise<WriteReport | ExtractReport>,
     noDest: string,
+    flags?: { usedPassword?: boolean; usedSplit?: boolean },
   ): Promise<void> {
+    const usedPassword = flags?.usedPassword ?? false;
+    const usedSplit = flags?.usedSplit ?? false;
     const epoch = begin({
       error: "",
-      job: { kind, progress: startingProgress(), dest: null },
+      compatConfirm: false,
+      job: { kind, progress: startingProgress(), dest: null, usedPassword, usedSplit },
     });
     try {
       const dest = await pickDest();
@@ -179,6 +189,8 @@ export const useAppStore = create<AppState>((set, get) => {
           kind,
           dest: report.dest,
           progress: doneProgress(report.entriesWritten, report.bytesWritten),
+          usedPassword,
+          usedSplit,
         },
         password: kind === "create" ? "" : get().password,
       });
@@ -221,19 +233,35 @@ export const useAppStore = create<AppState>((set, get) => {
     return bytes;
   }
 
-  function startCreate(replacements: Record<string, string>): Promise<void> {
-    const { dropped, plan, aesEnabled, password } = get();
+  function preflightCreate(): boolean {
+    const { aesEnabled, password } = get();
     if (aesEnabled && password.length === 0) {
-      set({ error: COPY.emptyPassword, job: null });
-      return Promise.resolve();
+      set({ error: COPY.emptyPassword, job: null, compatConfirm: false });
+      return false;
     }
     const split = splitBytesOrError();
     if (split === "empty") {
-      set({ error: COPY.splitCustomNeed, job: null });
-      return Promise.resolve();
+      set({ error: COPY.splitCustomNeed, job: null, compatConfirm: false });
+      return false;
     }
     if (split === "invalid") {
-      set({ error: COPY.splitCustomInvalid, job: null });
+      set({ error: COPY.splitCustomInvalid, job: null, compatConfirm: false });
+      return false;
+    }
+    return true;
+  }
+
+  function needsPasswordConfirm(): boolean {
+    return get().aesEnabled && !readCompatSkip();
+  }
+
+  function startCreate(replacements: Record<string, string>): Promise<void> {
+    if (!preflightCreate()) {
+      return Promise.resolve();
+    }
+    const { dropped, plan, aesEnabled, password } = get();
+    const split = splitBytesOrError();
+    if (split === "empty" || split === "invalid") {
       return Promise.resolve();
     }
     const sentPassword = aesEnabled ? password : null;
@@ -253,6 +281,10 @@ export const useAppStore = create<AppState>((set, get) => {
         );
       },
       COPY.noDest,
+      {
+        usedPassword: Boolean(sentPassword),
+        usedSplit: split != null,
+      },
     );
   }
 
@@ -482,10 +514,35 @@ export const useAppStore = create<AppState>((set, get) => {
           return;
         }
         set({ sheet: "none" });
+        if (!preflightCreate()) {
+          return;
+        }
+        if (needsPasswordConfirm()) {
+          set({ compatConfirm: true, error: "" });
+          return;
+        }
         await startCreate(replacements);
       } finally {
         set({ confirming: false });
       }
+    },
+
+    async confirmCompat(keepPassword, skipNext) {
+      if (!get().compatConfirm) {
+        return;
+      }
+      if (skipNext) {
+        writeCompatSkip(true);
+      }
+      if (!keepPassword) {
+        set({
+          aesEnabled: false,
+          password: "",
+          error: get().error === COPY.emptyPassword ? "" : get().error,
+        });
+      }
+      set({ compatConfirm: false });
+      await startCreate({ ...get().replacements });
     },
 
     async createZip() {
@@ -499,6 +556,13 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       if (plan && plan.issues.length > 0) {
         set({ sheet: "open", error: COPY.needConfirm });
+        return;
+      }
+      if (!preflightCreate()) {
+        return;
+      }
+      if (needsPasswordConfirm()) {
+        set({ compatConfirm: true, error: "" });
         return;
       }
       await startCreate({ ...get().replacements });

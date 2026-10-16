@@ -3,6 +3,7 @@ import { Box, Title, UnstyledButton } from "@mantine/core";
 import { hasTauri } from "./api";
 import { COPY } from "./copy";
 import { readGuideDismissed, writeGuideDismissed } from "./guide";
+import { CompatConfirm } from "./screens/CompatConfirm";
 import { CreateScreen } from "./screens/CreateScreen";
 import { ExtractScreen } from "./screens/ExtractScreen";
 import { HowToGuide } from "./screens/HowToGuide";
@@ -23,6 +24,7 @@ export default function App() {
   const replacements = useAppStore((s) => s.replacements);
   const job = useAppStore((s) => s.job);
   const confirming = useAppStore((s) => s.confirming);
+  const compatConfirm = useAppStore((s) => s.compatConfirm);
   const encodingOverride = useAppStore((s) => s.encodingOverride);
   const aesEnabled = useAppStore((s) => s.aesEnabled);
   const password = useAppStore((s) => s.password);
@@ -30,7 +32,7 @@ export default function App() {
   const splitPresetMb = useAppStore((s) => s.splitPresetMb);
   const splitCustomMb = useAppStore((s) => s.splitCustomMb);
   const isCreate = mode === "create";
-  const modalOpen = sheet === "open" || job !== null;
+  const modalOpen = sheet === "open" || job !== null || compatConfirm;
   const [guideOpen, setGuideOpen] = useState(() => !readGuideDismissed());
 
   function dismissGuide() {
@@ -186,13 +188,14 @@ export default function App() {
         onDrop={onDrop}
       >
         {guideOpen ? <HowToGuide onDismiss={dismissGuide} /> : null}
-        {isCreate && (aesEnabled || splitEnabled) && sheet !== "open" && !job ? (
+        {isCreate && (aesEnabled || splitEnabled) && sheet !== "open" && !job && !compatConfirm ? (
           <OptionPanels
             aesEnabled={aesEnabled}
             password={password}
             splitEnabled={splitEnabled}
             splitPresetMb={splitPresetMb}
             splitCustomMb={splitCustomMb}
+            showAlert={!plan}
           />
         ) : null}
         <section
@@ -205,7 +208,9 @@ export default function App() {
               <CreateScreen
                 plan={plan}
                 error={error}
-                canCreate={sheet !== "open"}
+                canCreate={sheet !== "open" && !compatConfirm}
+                aesEnabled={aesEnabled}
+                splitEnabled={splitEnabled}
                 onPick={() => void useAppStore.getState().pickInputs()}
                 onCreate={() => void useAppStore.getState().createZip()}
                 onReset={() => useAppStore.getState().resetWork()}
@@ -232,11 +237,23 @@ export default function App() {
               onDismiss={() => useAppStore.getState().dismissSheet()}
             />
           ) : null}
+          {compatConfirm ? (
+            <CompatConfirm
+              password={aesEnabled}
+              split={splitEnabled}
+              onProceed={(skipNext) => void useAppStore.getState().confirmCompat(true, skipNext)}
+              onWithoutPassword={(skipNext) =>
+                void useAppStore.getState().confirmCompat(false, skipNext)
+              }
+            />
+          ) : null}
           {job ? (
             <ProgressOverlay
               progress={job.progress}
               job={job.kind}
               dest={job.dest}
+              usedPassword={job.usedPassword}
+              usedSplit={job.usedSplit}
               onCancel={() => void useAppStore.getState().cancel()}
               onClose={() => useAppStore.getState().closeJob()}
             />

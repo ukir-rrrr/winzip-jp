@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { installApi, jaErr, resetApi } from "./api";
+import { COMPAT_SKIP_STORAGE_KEY, writeCompatSkip } from "./compatSkip";
 import { COPY } from "./copy";
 import { S3_PLAN } from "./e2e/scenes";
 import { useAppStore } from "./store";
@@ -8,6 +9,13 @@ import type { WriteReport } from "./types";
 
 afterEach(() => {
   resetApi();
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(COMPAT_SKIP_STORAGE_KEY);
+    }
+  } catch {
+    // テスト用ストレージが無い場合もある
+  }
   useAppStore.setState({
     mode: "create",
     dropped: [],
@@ -24,6 +32,7 @@ afterEach(() => {
     splitCustomMb: "",
     job: null,
     confirming: false,
+    compatConfirm: false,
     error: "",
     epoch: useAppStore.getState().epoch + 1,
   });
@@ -484,8 +493,147 @@ describe("AES オプション", () => {
     useAppStore.getState().setAesEnabled(true);
     useAppStore.getState().setPassword("パスワード");
     await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().compatConfirm, true);
+    assert.equal(sent, undefined);
+    await useAppStore.getState().confirmCompat(true, false);
     assert.equal(sent, "パスワード");
     assert.equal(useAppStore.getState().password, "");
+    assert.equal(useAppStore.getState().job?.usedPassword, true);
+  });
+
+  it("パスワードなしで作成するとパスワードを送らない", async () => {
+    let sent: string | null | undefined = "unset";
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        sent = req.password ?? null;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setAesEnabled(true);
+    useAppStore.getState().setPassword("パスワード");
+    await useAppStore.getState().createZip();
+    await useAppStore.getState().confirmCompat(false, false);
+    assert.equal(sent, null);
+    assert.equal(useAppStore.getState().aesEnabled, false);
+    assert.equal(useAppStore.getState().job?.usedPassword, false);
+  });
+
+  it("空パスワードでは確認に進まない", async () => {
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setAesEnabled(true);
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().compatConfirm, false);
+    assert.equal(useAppStore.getState().error, COPY.emptyPassword);
+  });
+});
+
+describe("互換確認", () => {
+  it("次回から表示しないを記録したら確認を飛ばす", async () => {
+    const memory = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem(key: string) {
+          return memory.has(key) ? (memory.get(key) ?? null) : null;
+        },
+        setItem(key: string, value: string) {
+          memory.set(key, value);
+        },
+        removeItem(key: string) {
+          memory.delete(key);
+        },
+      },
+    });
+    writeCompatSkip(true);
+    assert.equal(localStorage.getItem(COMPAT_SKIP_STORAGE_KEY), "1");
+    let sent: string | null | undefined;
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        sent = req.password ?? null;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setAesEnabled(true);
+    useAppStore.getState().setPassword("パスワード");
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().compatConfirm, false);
+    assert.equal(sent, "パスワード");
+    writeCompatSkip(false);
+  });
+
+  it("分割だけなら確認せず作る", async () => {
+    let sent: number | null | undefined;
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        sent = req.splitBytes ?? null;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setSplitEnabled(true);
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().compatConfirm, false);
+    assert.equal(sent, 10 * 1024 * 1024);
+    assert.equal(useAppStore.getState().job?.usedSplit, true);
+    assert.equal(useAppStore.getState().job?.usedPassword, false);
+  });
+
+  it("パスワードと分割が両方オンなら確認を共有する", async () => {
+    let password: string | null | undefined;
+    let split: number | null | undefined;
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async pickSaveZip() {
+        return "/tmp/e2e/送り.zip";
+      },
+      async createArchive(req) {
+        password = req.password ?? null;
+        split = req.splitBytes ?? null;
+        return { dest: "/tmp/e2e/送り.zip", entriesWritten: 1, bytesWritten: 1, excluded: [] };
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setAesEnabled(true);
+    useAppStore.getState().setPassword("秘密");
+    useAppStore.getState().setSplitEnabled(true);
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().compatConfirm, true);
+    assert.equal(password, undefined);
+    await useAppStore.getState().confirmCompat(true, false);
+    assert.equal(password, "秘密");
+    assert.equal(split, 10 * 1024 * 1024);
+    assert.equal(useAppStore.getState().job?.usedPassword, true);
+    assert.equal(useAppStore.getState().job?.usedSplit, true);
   });
 });
 
@@ -629,6 +777,8 @@ describe("展開エラー文言", () => {
       job: {
         kind: "extract",
         dest: null,
+        usedPassword: false,
+        usedSplit: false,
         progress: {
           phase: "writing",
           currentEntry: null,
