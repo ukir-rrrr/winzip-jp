@@ -37,6 +37,26 @@ body,
   line-height: 1.2;
 }
 
+[data-ui] .help-btn {
+  padding: 5px 10px;
+  border-radius: 8px;
+  color: var(--app-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+[data-ui] .help-btn:hover,
+[data-ui] .help-btn.is-on {
+  color: var(--app-ink);
+  background: var(--app-tab);
+}
+
+[data-ui] .help-btn:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
 [data-ui] .opt-switches {
   display: flex;
   align-items: center;
@@ -121,14 +141,19 @@ body,
 
 [data-ui] .content {
   flex: 1;
+  min-height: 0;
   display: flex;
+  flex-direction: column;
+  gap: 12px;
   padding: 22px;
+  overflow: auto;
 }
 
 [data-ui] .dropzone-shell {
   position: relative;
-  flex: 1;
+  flex: 1 0 auto;
   display: flex;
+  min-height: 280px;
   padding: 6px;
   border-radius: 20px;
   background: var(--app-well-outer);
@@ -154,6 +179,12 @@ body,
   background: var(--app-well-inner);
   text-align: center;
   padding: 40px 32px;
+}
+
+[data-ui] .content:has(.guide) .dropzone,
+[data-ui] .content:has(.option-banners) .dropzone {
+  min-height: 240px;
+  padding: 28px 24px;
 }
 
 [data-ui] .work-pane {
@@ -297,30 +328,80 @@ body,
   line-height: 1.5;
 }
 
-[data-ui] .option-banners {
-  position: absolute;
-  left: 22px;
-  right: 22px;
-  top: 22px;
-  z-index: 2;
+[data-ui] .guide {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--app-toolbar);
+}
+
+[data-ui] .guide-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+[data-ui] .guide-dismiss {
+  margin-left: auto;
+  min-width: 64px;
+  height: 28px;
+}
+
+[data-ui] .guide-steps {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0;
+  list-style: none;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+[data-ui] .guide-steps li:not(:last-child)::after {
+  content: " → ";
+  color: var(--app-muted);
+}
+
+[data-ui] .guide-extract {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--app-muted);
+}
+
+[data-ui] .option-banners {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 10px;
+}
+
+[data-ui] .option-banners > * {
+  min-width: 0;
+}
+
+[data-ui] .option-banners.is-both {
+  grid-template-columns: 1fr 1fr;
 }
 
 [data-ui] .aes-banner,
 [data-ui] .split-banner {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px 18px;
+  gap: 8px;
+  padding: 12px 14px;
   border-radius: 12px;
   background: var(--app-toolbar);
 }
 
 [data-ui] .aes-warning {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 650;
   line-height: 1.45;
   color: var(--app-ink);
@@ -328,9 +409,16 @@ body,
 
 [data-ui] .aes-note {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.5;
   color: var(--app-muted);
+}
+
+[data-ui] .aes-password-block {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 
 [data-ui] .aes-password-label {
@@ -342,8 +430,58 @@ body,
   color: var(--app-muted);
 }
 
+[data-ui] .aes-password-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 [data-ui] .aes-password {
-  width: min(20em, 100%);
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--app-field);
+  color: var(--app-ink);
+  font: inherit;
+}
+
+[data-ui] .aes-password::placeholder {
+  color: var(--app-muted);
+}
+
+[data-ui] .aes-password:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+[data-ui] .aes-reveal {
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--app-tab);
+  color: var(--app-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+[data-ui] .aes-reveal:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+[data-ui] .split-presets {
+  flex-wrap: wrap;
+}
+
+[data-ui] .split-presets .mode-tab {
+  min-width: 0;
+  padding: 7px 10px;
 }
 
 [data-ui] .sheet,
@@ -467,6 +605,7 @@ body,
   [data-ui] .mode-tab,
   [data-ui] .aes-switch,
   [data-ui] .split-switch,
+  [data-ui] .help-btn,
   [data-ui] .cmd-btn {
     transition: none;
   }

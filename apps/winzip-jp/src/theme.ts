@@ -1,7 +1,7 @@
 import { createTheme, type CSSVariablesResolver } from "@mantine/core";
 
 const systemSans =
-  '-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif';
+  '-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Noto Sans CJK JP", "Noto Sans JP", sans-serif';
 
 export const theme = createTheme({
   fontFamily: systemSans,
@@ -42,6 +42,7 @@ export const cssVariablesResolver: CSSVariablesResolver = (resolved) => ({
     "--app-accent": resolved.colors.macos[5],
     "--app-track": "#e4e4e8",
     "--app-tab": "#fbfbfd",
+    "--app-field": "#fbfbfd",
   },
   dark: {
     "--app-canvas": "#1c1c1e",
@@ -53,5 +54,6 @@ export const cssVariablesResolver: CSSVariablesResolver = (resolved) => ({
     "--app-accent": resolved.colors.macos[4],
     "--app-track": "#3a3a3c",
     "--app-tab": "#48484a",
+    "--app-field": "#1c1c1e",
   },
 });
