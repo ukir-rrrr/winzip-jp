@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "送りZIP",
+  "productName": "文字化けしないZIP",
   "version": "0.1.0",
   "identifier": "jp.riku.winzip",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "送りZIP",
+        "title": "文字化けしないZIP",
         "width": 800,
         "height": 600,
         "resizable": true

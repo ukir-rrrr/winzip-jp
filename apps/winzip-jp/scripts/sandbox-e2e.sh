@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 APP_DIR="$ROOT/apps/winzip-jp"
 TAURI="$APP_DIR/src-tauri"
+APP_NAME="文字化けしないZIP"
 ARTIFACTS="${SANDBOX_ARTIFACTS:-$APP_DIR/e2e/artifacts}"
 mkdir -p "$ARTIFACTS"
 
@@ -16,12 +17,12 @@ pnpm exec tauri build --debug \
   --features e2e \
   --bundles app
 
-APP="$ROOT/target/debug/bundle/macos/送りZIP.app"
+APP="$ROOT/target/debug/bundle/macos/${APP_NAME}.app"
 if [[ ! -d "$APP" ]]; then
-  APP="$TAURI/target/debug/bundle/macos/送りZIP.app"
+  APP="$TAURI/target/debug/bundle/macos/${APP_NAME}.app"
 fi
 if [[ ! -d "$APP" ]]; then
-  echo "サンドボックス .app が見つかりません: $ROOT/target/debug/bundle/macos/送りZIP.app" >&2
+  echo "サンドボックス .app が見つかりません: $ROOT/target/debug/bundle/macos/${APP_NAME}.app" >&2
   exit 1
 fi
 echo "app=${APP}"
@@ -76,7 +77,7 @@ fi
 
 BIN="$APP/Contents/MacOS/winzip-jp"
 if [[ ! -x "$BIN" ]]; then
-  BIN="$APP/Contents/MacOS/送りZIP"
+  BIN="$APP/Contents/MacOS/${APP_NAME}"
 fi
 if [[ ! -x "$BIN" ]]; then
   echo "実行ファイルがありません: $APP/Contents/MacOS" >&2
@@ -118,20 +119,20 @@ echo "sandbox probe ok"
 # S1 相当: 起動直後の作成ドロップゾーン。フィクスチャは開かない。
 open "$APP"
 for _ in $(seq 1 20); do
-  if pgrep -x "送りZIP" >/dev/null 2>&1 || pgrep -x "winzip-jp" >/dev/null 2>&1; then
+  if pgrep -x "$APP_NAME" >/dev/null 2>&1 || pgrep -x "winzip-jp" >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
-if ! pgrep -x "送りZIP" >/dev/null 2>&1 && ! pgrep -x "winzip-jp" >/dev/null 2>&1; then
-  echo "送りZIP が起動しませんでした" >&2
+if ! pgrep -x "$APP_NAME" >/dev/null 2>&1 && ! pgrep -x "winzip-jp" >/dev/null 2>&1; then
+  echo "${APP_NAME} が起動しませんでした" >&2
   exit 1
 fi
-osascript -e 'tell application "送りZIP" to activate' >/dev/null 2>&1 || true
+osascript -e "tell application \"${APP_NAME}\" to activate" >/dev/null 2>&1 || true
 sleep 10
 screencapture -x "$ARTIFACTS/s1-sandbox.png"
 # スクリプト自身（パスに winzip-jp を含む）は殺さない
-killall "送りZIP" >/dev/null 2>&1 || true
+killall "$APP_NAME" >/dev/null 2>&1 || true
 killall "winzip-jp" >/dev/null 2>&1 || true
 
 if [[ ! -s "$ARTIFACTS/s1-sandbox.png" ]]; then

@@ -99,14 +99,14 @@ export default function App() {
   return (
     <Box className="shell" data-ui data-mode={mode} data-testid="app-shell">
       <Box component="header" className="toolbar" inert={modalOpen || undefined}>
-        <Title order={1} className="app-title">
+        <Title order={1} className="app-title" data-testid="app-title">
           {COPY.appTitle}
         </Title>
         <UnstyledButton
           type="button"
           className={guideOpen ? "help-btn is-on" : "help-btn"}
           data-testid="btn-guide"
-          aria-label={COPY.guideOpen}
+          aria-label={COPY.guideTitle}
           aria-pressed={guideOpen}
           title={COPY.guideOpen}
           onClick={toggleGuide}

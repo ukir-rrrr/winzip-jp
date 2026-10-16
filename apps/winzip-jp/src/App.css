@@ -33,8 +33,10 @@ body,
   margin: 0;
   font-size: 15px;
   font-weight: 650;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 [data-ui] .help-btn {

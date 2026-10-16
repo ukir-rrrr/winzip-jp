@@ -251,6 +251,18 @@ fn info_plist_sets_encryption_and_utility_category() {
         !plist.contains("downloads.read-write") && !plist.contains("network.client"),
         "Info.plist に禁止 entitlement を書かない"
     );
+    assert!(
+        entries
+            .iter()
+            .any(|(k, v)| k == "CFBundleDisplayName" && v == "文字化けしないZIP"),
+        "Finder / Dock の表示名: {entries:?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|(k, v)| k == "CFBundleName" && v == "文字化けしないZIP"),
+        "メニューバーの短い名前: {entries:?}"
+    );
 
     for name in ["tauri.conf.json", "tauri.appstore.conf.json"] {
         let json: serde_json::Value =
@@ -265,6 +277,35 @@ fn info_plist_sets_encryption_and_utility_category() {
             .expect("infoPlist");
         assert!(info.ends_with("Info.plist"), "{name}: {info}");
     }
+}
+
+#[test]
+fn display_name_is_user_facing_and_identifier_unchanged() {
+    let json: serde_json::Value =
+        serde_json::from_str(&read(&tauri_dir().join("tauri.conf.json"))).unwrap();
+    assert_eq!(
+        json["productName"].as_str(),
+        Some("文字化けしないZIP"),
+        "productName はユーザー向け表示名"
+    );
+    assert_eq!(
+        json["identifier"].as_str(),
+        Some("jp.riku.winzip"),
+        "Bundle ID は変えない"
+    );
+    assert_eq!(
+        json["app"]["windows"][0]["title"].as_str(),
+        Some("文字化けしないZIP")
+    );
+    let cargo = read(&tauri_dir().join("Cargo.toml"));
+    assert!(
+        cargo.contains("name = \"winzip-jp\""),
+        "crate 名 winzip-jp は変えない"
+    );
+    assert!(
+        !cargo.contains("name = \"文字化けしないZIP\""),
+        "crate 名に表示名を入れない"
+    );
 }
 
 #[test]
@@ -297,8 +338,12 @@ fn e2e_open_is_cfg_gated_in_source() {
 fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
     let sh = read(&tauri_dir().join("../scripts/sandbox-e2e.sh"));
     assert!(
-        sh.contains("送りZIP.app"),
+        sh.contains("APP_NAME=\"文字化けしないZIP\"") && sh.contains("${APP_NAME}.app"),
         "バンドルパスを find | head にしない"
+    );
+    assert!(
+        !sh.contains("送りZIP"),
+        "旧表示名 送りZIP をサンドボックス起動に残さない"
     );
     assert!(
         !sh.contains("| head -1") && !sh.contains("| head -n 1"),
@@ -321,7 +366,12 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
         "codesign --deep は WebView ヘルパーを壊す"
     );
     let pkg = read(&tauri_dir().join("../scripts/appstore-pkg.sh"));
-    assert!(pkg.contains("送りZIP.app"));
+    assert!(pkg.contains("APP_NAME=\"文字化けしないZIP\"") && pkg.contains("${APP_NAME}.app"));
+    assert!(!pkg.contains("送りZIP"));
+    assert!(
+        pkg.contains("CFBundleDisplayName"),
+        "提出用 .app の表示名を Info.plist で確認する"
+    );
     assert!(!pkg.contains("| head -1") && !pkg.contains("| head -n 1"));
     assert!(
         pkg.contains("Info.plist がありません"),

@@ -1,5 +1,5 @@
 export const COPY = {
-  appTitle: "送りZIP",
+  appTitle: "文字化けしないZIP",
   mode: "モード",
   create: "作成",
   extract: "解凍",
@@ -68,7 +68,7 @@ export const COPY = {
   tipCreate: "Windows で開ける ZIP を作ります。",
   tipExtract: "文字化けした ZIP を正しく展開します。",
   guideOpen: "使い方",
-  guideTitle: "使い方",
+  guideTitle: "文字化けしないZIP の使い方",
   guideStepDrop: "ファイルをドロップする",
   guideStepOptions: "必要ならパスワードや分割を付ける",
   guideStepSave: "保存先を選ぶ",
