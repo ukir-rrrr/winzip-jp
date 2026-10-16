@@ -15,3 +15,9 @@ apps/winzip-jp/e2e/artifacts/
 apps/winzip-jp/src-tauri/gen/
 
 .taste-skill/
+
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+.env
