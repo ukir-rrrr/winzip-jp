@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 APP_DIR="$ROOT/apps/winzip-jp"
 TAURI="$APP_DIR/src-tauri"
+APP_NAME="文字化けしないZIP"
 ARTIFACTS="${APPSTORE_ARTIFACTS:-$APP_DIR/e2e/artifacts}"
 mkdir -p "$ARTIFACTS"
 
@@ -15,19 +16,19 @@ pnpm exec tauri build \
   --config src-tauri/tauri.appstore.conf.json \
   --bundles app
 
-APP="$ROOT/target/release/bundle/macos/送りZIP.app"
+APP="$ROOT/target/release/bundle/macos/${APP_NAME}.app"
 if [[ ! -d "$APP" ]]; then
-  APP="$TAURI/target/release/bundle/macos/送りZIP.app"
+  APP="$TAURI/target/release/bundle/macos/${APP_NAME}.app"
 fi
 if [[ ! -d "$APP" ]]; then
-  echo "App Store 用 .app が見つかりません: $ROOT/target/release/bundle/macos/送りZIP.app" >&2
+  echo "App Store 用 .app が見つかりません: $ROOT/target/release/bundle/macos/${APP_NAME}.app" >&2
   exit 1
 fi
 echo "app=${APP}"
 
 BIN="$APP/Contents/MacOS/winzip-jp"
 if [[ ! -x "$BIN" ]]; then
-  BIN="$APP/Contents/MacOS/送りZIP"
+  BIN="$APP/Contents/MacOS/${APP_NAME}"
 fi
 if [[ ! -x "$BIN" ]]; then
   echo "実行ファイルがありません: $APP/Contents/MacOS" >&2
@@ -54,6 +55,14 @@ if ! grep -q ITSAppUsesNonExemptEncryption "$INFO"; then
 fi
 if ! grep -q public.app-category.utilities "$INFO"; then
   echo "Info.plist のカテゴリが Utility ではありません" >&2
+  exit 1
+fi
+if ! grep -A1 '<key>CFBundleDisplayName</key>' "$INFO" | grep -Fq "$APP_NAME"; then
+  echo "Info.plist の CFBundleDisplayName が ${APP_NAME} ではありません" >&2
+  exit 1
+fi
+if ! grep -q 'jp.riku.winzip' "$INFO"; then
+  echo "Info.plist の Bundle ID が jp.riku.winzip ではありません" >&2
   exit 1
 fi
 

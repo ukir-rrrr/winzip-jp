@@ -24,13 +24,20 @@ describe("画面 S1–S10", () => {
     await expect(extract).toHaveAttribute("aria-label", "解凍");
     await expect(create).toHaveAttribute("title", "Windows で開ける ZIP を作ります。");
     await expect(extract).toHaveAttribute("title", "文字化けした ZIP を正しく展開します。");
+    await expect($("[data-testid='app-title']")).toHaveText("文字化けしないZIP");
     await expect($("[data-testid='btn-guide']")).toBeDisplayed();
+    await expect($("[data-testid='btn-guide']")).toHaveAttribute(
+      "aria-label",
+      "文字化けしないZIP の使い方",
+    );
     await expect($("[data-testid='guide']")).not.toBeExisting();
     await expect(create).toHaveAttribute("aria-selected", "true");
     await expect($("[data-testid='dropzone-title']")).toHaveText(
       "ファイルをドロップして ZIP を作成",
     );
     const body = await $("body").getText();
+    expect(body).toContain("文字化けしないZIP");
+    expect(body).not.toContain("送りZIP");
     expect(body).toContain("Windows で開ける形式（CP932）で保存します");
     expect(body).not.toContain("Windows のエクスプローラーでは開けません");
     expect(body).not.toContain("Windows 標準では開けません");
@@ -248,12 +255,21 @@ describe("画面 S1–S10", () => {
     await openScene("guide");
     const guide = $("[data-testid='guide']");
     await expect(guide).toBeDisplayed();
+    await expect(guide).toHaveAttribute("aria-label", "文字化けしないZIP の使い方");
+    await expect($("[data-testid='app-title']")).toHaveText("文字化けしないZIP");
     const text = await guide.getText();
     expect(text).toContain("ファイルをドロップする");
     expect(text).toContain("必要ならパスワードや分割を付ける");
     expect(text).toContain("保存先を選ぶ");
     expect(text).toContain("解凍タブでは、Windows から来た文字化け ZIP を直せます。");
     await expect($("[data-testid='btn-guide']")).toHaveAttribute("aria-pressed", "true");
+    await expect($("[data-testid='btn-guide']")).toHaveAttribute(
+      "aria-label",
+      "文字化けしないZIP の使い方",
+    );
+    const body = await $("body").getText();
+    expect(body).toContain("文字化けしないZIP");
+    expect(body).not.toContain("送りZIP");
     await shot("s10");
     await $("[data-testid='guide-dismiss']").click();
     await expect(guide).not.toBeDisplayed();
