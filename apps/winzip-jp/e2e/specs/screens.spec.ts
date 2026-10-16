@@ -206,6 +206,8 @@ describe("画面 S1–S10", () => {
     await $("[data-testid='aes-password-toggle']").click();
     await expect(input).toHaveAttribute("type", "text");
     await expect(input).toHaveValue("秘密");
+    await expect($("[data-testid='aes-password-toggle']")).toHaveText("表示");
+    await expect($("[data-testid='aes-password-toggle']")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("S10 初回ガイド: 3 手順と解凍の説明", async () => {
