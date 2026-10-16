@@ -15,13 +15,17 @@ async function openScene(id?: string): Promise<void> {
   await $("[data-testid='app-shell']").waitForDisplayed();
 }
 
-describe("画面 S1–S9b", () => {
+describe("画面 S1–S10", () => {
   it("S1 起動: 作成ドロップゾーンと VoiceOver 名", async () => {
     await openScene();
     const create = $("[data-testid='tab-create']");
     const extract = $("[data-testid='tab-extract']");
     await expect(create).toHaveAttribute("aria-label", "作成");
     await expect(extract).toHaveAttribute("aria-label", "解凍");
+    await expect(create).toHaveAttribute("title", "Windows で開ける ZIP を作ります。");
+    await expect(extract).toHaveAttribute("title", "文字化けした ZIP を正しく展開します。");
+    await expect($("[data-testid='btn-guide']")).toBeDisplayed();
+    await expect($("[data-testid='guide']")).not.toBeExisting();
     await expect(create).toHaveAttribute("aria-selected", "true");
     await expect($("[data-testid='dropzone-title']")).toHaveText(
       "ファイルをドロップして ZIP を作成",
@@ -115,6 +119,11 @@ describe("画面 S1–S9b", () => {
     await openScene();
     await $("[data-testid='aes-toggle']").click();
     await expect($("[data-testid='aes-toggle']")).toHaveAttribute("aria-checked", "true");
+    await expect($("[data-testid='aes-toggle']")).toHaveAttribute(
+      "title",
+      "ZIP にパスワードを付けます。エクスプローラーでは開けません。",
+    );
+    await expect($("[data-testid='aes-password']")).toBeDisplayed();
     await expect($("[data-testid='aes-warning']")).toHaveText(
       "パスワード付き ZIP は、Windows のエクスプローラーでは開けません。7-Zip などが必要です。",
     );
@@ -128,6 +137,10 @@ describe("画面 S1–S9b", () => {
     await openScene();
     await $("[data-testid='split-toggle']").click();
     await expect($("[data-testid='split-toggle']")).toHaveAttribute("aria-checked", "true");
+    await expect($("[data-testid='split-toggle']")).toHaveAttribute(
+      "title",
+      "指定サイズで分けます。エクスプローラーでは開けません。",
+    );
     await expect($("[data-testid='split-warning']")).toHaveText(
       "分割した ZIP もエクスプローラーでは開けません。",
     );
@@ -138,6 +151,80 @@ describe("画面 S1–S9b", () => {
     expect(body).toContain("25 MB");
     expect(body).toContain("100 MB");
     await shot("s9b");
+  });
+
+  it("S9c パスワードと分割を同時に開く: 入力が見え、選ぶボタンは隠れない", async () => {
+    await openScene();
+    await $("[data-testid='aes-toggle']").click();
+    await $("[data-testid='split-toggle']").click();
+    const input = $("[data-testid='aes-password']");
+    const pick = $("[data-testid='btn-pick-files']");
+    await expect(input).toBeDisplayed();
+    await expect(pick).toBeDisplayed();
+    await expect($("[data-testid='aes-password-toggle']")).toHaveText("表示");
+    await expect($("[data-testid='aes-password-toggle']")).toHaveAttribute(
+      "aria-label",
+      "パスワードを表示",
+    );
+    const layout = await browser.execute(() => {
+      const field = document.querySelector("[data-testid='aes-password']");
+      const button = document.querySelector("[data-testid='btn-pick-files']");
+      const banners = document.querySelector("[data-testid='option-banners']");
+      if (
+        !(field instanceof HTMLElement) ||
+        !(button instanceof HTMLElement) ||
+        !(banners instanceof HTMLElement)
+      ) {
+        return { ok: false };
+      }
+      button.scrollIntoView({ block: "nearest" });
+      const fieldBox = field.getBoundingClientRect();
+      const buttonBox = button.getBoundingClientRect();
+      const bannerBox = banners.getBoundingClientRect();
+      const overlap = !(
+        buttonBox.bottom <= bannerBox.top + 0.5 ||
+        buttonBox.top >= bannerBox.bottom - 0.5 ||
+        buttonBox.right <= bannerBox.left ||
+        buttonBox.left >= bannerBox.right
+      );
+      return {
+        ok:
+          fieldBox.width >= 80 &&
+          fieldBox.height >= 24 &&
+          buttonBox.width >= 60 &&
+          buttonBox.height >= 24 &&
+          buttonBox.top >= bannerBox.bottom - 1 &&
+          !overlap,
+      };
+    });
+    expect(layout.ok).toBe(true);
+    await browser.execute(() => {
+      document.querySelector("[data-testid='content']")?.scrollTo(0, 0);
+    });
+    await shot("s9c");
+    await input.setValue("秘密");
+    await $("[data-testid='aes-password-toggle']").click();
+    await expect(input).toHaveAttribute("type", "text");
+    await expect(input).toHaveValue("秘密");
+    await expect($("[data-testid='aes-password-toggle']")).toHaveText("表示");
+    await expect($("[data-testid='aes-password-toggle']")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("S10 初回ガイド: 3 手順と解凍の説明", async () => {
+    await openScene("guide");
+    const guide = $("[data-testid='guide']");
+    await expect(guide).toBeDisplayed();
+    const text = await guide.getText();
+    expect(text).toContain("ファイルをドロップする");
+    expect(text).toContain("必要ならパスワードや分割を付ける");
+    expect(text).toContain("保存先を選ぶ");
+    expect(text).toContain("解凍タブでは、Windows から来た文字化け ZIP を直せます。");
+    await expect($("[data-testid='btn-guide']")).toHaveAttribute("aria-pressed", "true");
+    await shot("s10");
+    await $("[data-testid='guide-dismiss']").click();
+    await expect(guide).not.toBeDisplayed();
+    await $("[data-testid='btn-guide']").click();
+    await expect($("[data-testid='guide']")).toBeDisplayed();
   });
 
   it("展開 CRC 不一致は英語頭字語を出さない", async () => {

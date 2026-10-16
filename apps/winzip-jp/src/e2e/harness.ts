@@ -1,8 +1,17 @@
 import { installApi, jaErr, resetApi } from "../api";
 import { COPY } from "../copy";
+import { GUIDE_STORAGE_KEY } from "../guide";
 import { useAppStore } from "../store";
 import { E2E_CREATE_DEST, E2E_EXTRACT_DEST, S2_PLAN, S3_PLAN, S6_LIST, S7_LIST } from "./scenes";
 import type { ListReport, NameEncoding, PlanDto, WriteReport, ZipApi } from "../types";
+
+function syncGuide(scene: string | null): void {
+  if (scene === "guide") {
+    localStorage.removeItem(GUIDE_STORAGE_KEY);
+    return;
+  }
+  localStorage.setItem(GUIDE_STORAGE_KEY, "1");
+}
 
 export type E2eApi = {
   reset: () => void;
@@ -63,8 +72,12 @@ function mockApi(
 
 async function loadScene(id: string): Promise<void> {
   resetApi();
+  syncGuide(id);
   const store = useAppStore.getState();
   store.setMode("create");
+  if (id === "guide") {
+    return;
+  }
 
   if (id === "s2") {
     installApi(mockApi(S2_PLAN, () => null));
@@ -100,9 +113,12 @@ async function loadScene(id: string): Promise<void> {
 }
 
 export async function installE2eHarness(): Promise<E2eApi> {
+  const scene = new URLSearchParams(window.location.search).get("scene");
+  syncGuide(scene);
   const api: E2eApi = {
     reset() {
       resetApi();
+      syncGuide(null);
       useAppStore.getState().setMode("create");
     },
     loadScene,
@@ -121,7 +137,6 @@ export async function installE2eHarness(): Promise<E2eApi> {
     },
   };
   window.__WINZIP_E2E__ = api;
-  const scene = new URLSearchParams(window.location.search).get("scene");
   if (scene) {
     await loadScene(scene);
   }

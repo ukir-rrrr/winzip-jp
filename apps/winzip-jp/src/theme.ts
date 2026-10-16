@@ -1,7 +1,7 @@
 import { createTheme, type CSSVariablesResolver } from "@mantine/core";
 
 const systemSans =
-  '-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif';
+  '-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Noto Sans CJK JP", "Noto Sans JP", sans-serif';
 
 export const theme = createTheme({
   fontFamily: systemSans,
@@ -40,8 +40,11 @@ export const cssVariablesResolver: CSSVariablesResolver = (resolved) => ({
     "--app-ink": "#1d1d1f",
     "--app-muted": "#6e6e73",
     "--app-accent": resolved.colors.macos[5],
+    "--app-accent-pressed": resolved.colors.macos[6],
     "--app-track": "#e4e4e8",
     "--app-tab": "#fbfbfd",
+    "--app-field": "#ffffff",
+    "--app-field-edge": "#6e6e73",
   },
   dark: {
     "--app-canvas": "#1c1c1e",
@@ -51,7 +54,10 @@ export const cssVariablesResolver: CSSVariablesResolver = (resolved) => ({
     "--app-ink": "#f5f5f7",
     "--app-muted": "#98989d",
     "--app-accent": resolved.colors.macos[4],
+    "--app-accent-pressed": resolved.colors.macos[4],
     "--app-track": "#3a3a3c",
     "--app-tab": "#48484a",
+    "--app-field": "#1c1c1e",
+    "--app-field-edge": "#98989d",
   },
 });
