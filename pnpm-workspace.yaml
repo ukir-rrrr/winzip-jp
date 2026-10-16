@@ -1,2 +1,9 @@
 packages:
   - apps/winzip-jp
+
+# mocha 12 は @wdio/mocha-framework@9 が mocha/lib/cli/run-helpers.js を import するため使えない。
+overrides:
+  serialize-javascript: "^7.1.2"
+  chokidar: "^4.0.3"
+  "@puppeteer/browsers": "^3.2.5"
+  basic-ftp: "^6.2.3"

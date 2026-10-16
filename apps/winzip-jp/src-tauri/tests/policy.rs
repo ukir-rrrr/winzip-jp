@@ -150,6 +150,43 @@ fn fs_scope_does_not_include_home() {
 }
 
 #[test]
+fn csp_is_strict_and_not_null() {
+    let json: serde_json::Value =
+        serde_json::from_str(&read(&tauri_dir().join("tauri.conf.json"))).unwrap();
+    let csp = json["app"]["security"]["csp"]
+        .as_str()
+        .expect("csp は文字列。null は XSS 対策を無効化する");
+    assert!(
+        csp.contains("default-src 'self'"),
+        "default-src 'self' が無い: {csp}"
+    );
+    assert!(
+        csp.contains("script-src 'self'"),
+        "script-src 'self' が無い: {csp}"
+    );
+    assert!(
+        csp.contains("style-src 'self' 'unsafe-inline'"),
+        "style-src が無い: {csp}"
+    );
+    assert!(
+        csp.contains("connect-src") && csp.contains("ipc:") && csp.contains("http://ipc.localhost"),
+        "Tauri IPC の connect-src が無い: {csp}"
+    );
+    assert!(
+        csp.contains("img-src 'self' data: asset:"),
+        "img-src が無い: {csp}"
+    );
+    assert!(
+        !csp.contains("unsafe-eval"),
+        "script-src に unsafe-eval を足さない: {csp}"
+    );
+    assert!(
+        !csp.split_whitespace().any(|t| t == "*"),
+        "ワイルドカード CSP: {csp}"
+    );
+}
+
+#[test]
 fn capabilities_are_pinned_to_default() {
     for name in ["tauri.conf.json", "tauri.appstore.conf.json", "tauri.e2e.conf.json"] {
         let json: serde_json::Value =
