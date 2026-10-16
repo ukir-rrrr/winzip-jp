@@ -55,7 +55,7 @@ export function OptionPanels({
                 aria-label={COPY.showPasswordLabel}
                 onClick={() => setPasswordVisible((open) => !open)}
               >
-                {passwordVisible ? COPY.hidePassword : COPY.showPassword}
+                {COPY.showPassword}
               </UnstyledButton>
             </div>
           </div>

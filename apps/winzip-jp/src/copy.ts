@@ -49,7 +49,6 @@ export const COPY = {
   aesUtf8Note: "日本語のパスワードは、先方も UTF-8 前提のツールに限ります。",
   aesPlaceholder: "パスワード",
   showPassword: "表示",
-  hidePassword: "隠す",
   showPasswordLabel: "パスワードを表示",
   emptyPassword: "パスワードを入力してください",
   splitOption: "分割",
