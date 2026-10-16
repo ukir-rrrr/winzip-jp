@@ -60,6 +60,7 @@ export type AppState = {
   dismissSheet: () => void;
   confirmAndCreate: () => Promise<void>;
   confirmCompat: (keepPassword: boolean, skipNext: boolean) => Promise<void>;
+  dismissCompatConfirm: () => void;
   createZip: () => Promise<void>;
   setAesEnabled: (on: boolean) => void;
   setPassword: (password: string) => void;
@@ -525,6 +526,13 @@ export const useAppStore = create<AppState>((set, get) => {
       } finally {
         set({ confirming: false });
       }
+    },
+
+    dismissCompatConfirm() {
+      if (!get().compatConfirm) {
+        return;
+      }
+      set({ compatConfirm: false });
     },
 
     async confirmCompat(keepPassword, skipNext) {

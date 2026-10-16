@@ -171,6 +171,7 @@ describe("画面 S1–S10", () => {
     expect(text).toContain("相手が Windows 標準で開くなら、パスワードはオフにしてください");
     expect(text).toContain("このまま作成");
     expect(text).toContain("パスワードなしで作成");
+    expect(text).toContain("やめる");
     expect(text).toContain("次回から表示しない");
     await shot("s9d");
     await $("[data-testid='btn-create-anyway']").click();

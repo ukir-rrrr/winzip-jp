@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { UnstyledButton } from "@mantine/core";
 import { COPY } from "../copy";
 import { CompatNotice } from "./CompatNotice";
@@ -8,13 +8,26 @@ export function CompatConfirm({
   split,
   onProceed,
   onWithoutPassword,
+  onDismiss,
 }: {
   password: boolean;
   split: boolean;
   onProceed: (skipNext: boolean) => void;
   onWithoutPassword: (skipNext: boolean) => void;
+  onDismiss: () => void;
 }) {
   const [skipNext, setSkipNext] = useState(false);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onDismiss();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onDismiss]);
 
   return (
     <div
@@ -35,6 +48,14 @@ export function CompatConfirm({
         {COPY.compatSkipNext}
       </label>
       <div className="sheet-actions">
+        <UnstyledButton
+          type="button"
+          className="cmd-btn cmd-btn-quiet"
+          data-testid="btn-compat-dismiss"
+          onClick={onDismiss}
+        >
+          {COPY.dismissSheet}
+        </UnstyledButton>
         <UnstyledButton
           type="button"
           className="cmd-btn cmd-btn-quiet"

@@ -583,6 +583,26 @@ describe("互換確認", () => {
     writeCompatSkip(false);
   });
 
+  it("確認をやめると作成しない", async () => {
+    installApi({
+      async planArchive() {
+        return { entries: ["keep.txt"], issues: [], excluded: [], destNameHint: "keep.zip" };
+      },
+      async createArchive() {
+        throw new Error("呼ばれてはいけない");
+      },
+    });
+    await useAppStore.getState().ingestDropped(["/tmp/e2e/in"]);
+    useAppStore.getState().setAesEnabled(true);
+    useAppStore.getState().setPassword("パスワード");
+    await useAppStore.getState().createZip();
+    assert.equal(useAppStore.getState().compatConfirm, true);
+    useAppStore.getState().dismissCompatConfirm();
+    assert.equal(useAppStore.getState().compatConfirm, false);
+    assert.equal(useAppStore.getState().job, null);
+    assert.equal(useAppStore.getState().aesEnabled, true);
+  });
+
   it("分割だけなら確認せず作る", async () => {
     let sent: number | null | undefined;
     installApi({

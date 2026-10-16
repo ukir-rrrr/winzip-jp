@@ -245,6 +245,7 @@ export default function App() {
               onWithoutPassword={(skipNext) =>
                 void useAppStore.getState().confirmCompat(false, skipNext)
               }
+              onDismiss={() => useAppStore.getState().dismissCompatConfirm()}
             />
           ) : null}
           {job ? (
