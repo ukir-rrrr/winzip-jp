@@ -473,7 +473,7 @@ body,
 
 [data-ui] .aes-reveal.is-on {
   background: var(--app-field);
-  color: var(--app-accent);
+  color: var(--app-accent-pressed);
 }
 
 [data-ui] .aes-reveal:focus-visible {
