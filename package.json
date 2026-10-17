@@ -8,6 +8,7 @@
     "preview": "pnpm --filter winzip-jp preview",
     "tauri": "pnpm --filter winzip-jp tauri",
     "build:debug": "pnpm --filter winzip-jp build:debug",
-    "e2e": "pnpm --filter winzip-jp e2e"
+    "e2e": "pnpm --filter winzip-jp e2e",
+    "store-screenshots": "pnpm --filter winzip-jp store-screenshots"
   }
 }

@@ -11,9 +11,10 @@
     "build:debug": "tauri build --debug --bundles app",
     "build:sandbox-e2e": "tauri build --debug --config src-tauri/tauri.appstore.conf.json --features e2e --bundles app",
     "build:appstore": "tauri build --config src-tauri/tauri.appstore.conf.json --bundles app",
-    "test": "tsx --test src/replacements.test.ts src/store.test.ts src/api.test.ts src/guide.test.ts src/compatSkip.test.ts",
+    "test": "tsx --test src/replacements.test.ts src/store.test.ts src/api.test.ts src/guide.test.ts src/compatSkip.test.ts src/e2e/scenes.test.ts",
     "e2e": "node e2e/run.mjs",
-    "e2e:tauri": "wdio run e2e/wdio.tauri.conf.ts"
+    "e2e:tauri": "wdio run e2e/wdio.tauri.conf.ts",
+    "store-screenshots": "node e2e/store-screenshots.mjs"
   },
   "dependencies": {
     "@mantine/core": "^9.7.2",
@@ -39,6 +40,7 @@
     "@wdio/types": "^9.32.0",
     "expect-webdriverio": "^6.0.9",
     "pixelmatch": "^7.1.0",
+    "playwright": "^1.64.1",
     "pngjs": "^7.0.0",
     "postcss": "^8.5.30",
     "postcss-preset-mantine": "^1.18.0",
