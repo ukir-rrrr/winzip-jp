@@ -3,7 +3,17 @@ import { COPY } from "../copy";
 import { COMPAT_SKIP_STORAGE_KEY } from "../compatSkip";
 import { GUIDE_STORAGE_KEY } from "../guide";
 import { useAppStore } from "../store";
-import { E2E_CREATE_DEST, E2E_EXTRACT_DEST, S2_PLAN, S3_PLAN, S6_LIST, S7_LIST } from "./scenes";
+import {
+  E2E_CREATE_DEST,
+  E2E_EXTRACT_DEST,
+  S2_PLAN,
+  S3_PLAN,
+  S6_LIST,
+  S7_LIST,
+  STORE_CREATE_PLAN,
+  STORE_EXTRACT_LIST,
+  STORE_JUNK_PLAN,
+} from "./scenes";
 import type { ListReport, NameEncoding, PlanDto, WriteReport, ZipApi } from "../types";
 
 function syncGuide(scene: string | null): void {
@@ -108,6 +118,22 @@ async function loadScene(id: string): Promise<void> {
     store.setMode("extract");
     installApi(mockApi(null, (encoding) => (encoding === "utf8" ? S7_LIST : S6_LIST)));
     await store.ingestDropped(["/tmp/e2e/cp932-typical.zip"]);
+    return;
+  }
+  if (id === "store-create") {
+    installApi(mockApi(STORE_CREATE_PLAN, () => null));
+    await store.ingestDropped(["/tmp/e2e/store-create"]);
+    return;
+  }
+  if (id === "store-junk") {
+    installApi(mockApi(STORE_JUNK_PLAN, () => null));
+    await store.ingestDropped(["/tmp/e2e/store-junk"]);
+    return;
+  }
+  if (id === "store-extract") {
+    store.setMode("extract");
+    installApi(mockApi(null, () => STORE_EXTRACT_LIST));
+    await store.ingestDropped(["/tmp/e2e/store-extract.zip"]);
     return;
   }
   if (id === "s9d") {

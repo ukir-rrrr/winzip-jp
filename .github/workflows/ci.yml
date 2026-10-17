@@ -13,6 +13,17 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  store-copy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check store listing, pages, and screenshot sizes
+        run: node docs/store/check-listing.mjs
+
   zipcore:
     strategy:
       fail-fast: false
@@ -149,6 +160,10 @@ jobs:
       - uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check store listing copy
+        run: node docs/store/check-listing.mjs
+        env:
+          STORE_LISTING_SKIP_SHOTS: "1"
       - name: Frontend unit tests
         run: pnpm --filter winzip-jp test
       - name: Production dist に E2E ハーネスが無い
@@ -162,6 +177,12 @@ jobs:
         run: VITE_E2E=1 pnpm --filter winzip-jp build
       - name: WebdriverIO S1–S8 + pixelmatch
         run: pnpm --filter winzip-jp e2e
+      - name: Store screenshots 2880x1800
+        run: pnpm --filter winzip-jp store-screenshots
+        env:
+          STORE_SHOT_CHANNEL: chrome
+      - name: Check store listing and screenshot sizes
+        run: node docs/store/check-listing.mjs
       - name: Build Tauri debug app
         run: pnpm --filter winzip-jp build:debug
       - name: Capture debug app window
@@ -186,4 +207,10 @@ jobs:
         with:
           name: e2e-screenshots
           path: apps/winzip-jp/e2e/artifacts/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: store-screenshots
+          path: docs/store/screenshots/*.png
           if-no-files-found: error

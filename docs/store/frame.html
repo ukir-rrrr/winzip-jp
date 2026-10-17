@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=2880, height=1800" />
+    <title>文字化けしないZIP</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 2880px;
+        height: 1800px;
+        overflow: hidden;
+        background: #f4f2ec;
+        color: #2f3437;
+        font-family:
+          "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", "Noto Sans JP",
+          "Yu Gothic UI", -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+
+      [data-ui].shot {
+        box-sizing: border-box;
+        width: 2880px;
+        height: 1800px;
+        display: flex;
+        flex-direction: column;
+        padding: 88px 120px 72px;
+        background: #f4f2ec;
+      }
+
+      [data-ui] .copy {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin: 0 0 40px;
+      }
+
+      [data-ui] h1 {
+        margin: 0;
+        font-size: 64px;
+        font-weight: 650;
+        letter-spacing: -0.03em;
+        line-height: 1.15;
+        color: #2f3437;
+      }
+
+      [data-ui] .note {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.45;
+        color: #6e6e73;
+      }
+
+      [data-ui] .note[hidden] {
+        display: none;
+      }
+
+      [data-ui] .window {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        border-radius: 12px;
+        overflow: hidden;
+        background: #e4e4e8;
+      }
+
+      [data-ui] .titlebar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        padding: 0 16px;
+        background: #e4e4e8;
+      }
+
+      [data-ui] .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #8e8e93;
+      }
+
+      [data-ui] .ui {
+        display: block;
+        width: 100%;
+        height: calc(100% - 36px);
+        object-fit: contain;
+        object-position: top center;
+        background: #f2f2f4;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shot" data-ui>
+      <header class="copy">
+        <h1 id="headline">{{HEADLINE}}</h1>
+        <p id="note" class="note">{{NOTE}}</p>
+      </header>
+      <figure class="window">
+        <div class="titlebar" aria-hidden="true">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+        <img id="ui" class="ui" alt="文字化けしないZIP の画面" src="{{IMAGE}}" />
+      </figure>
+    </div>
+  </body>
+</html>
