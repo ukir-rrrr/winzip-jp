@@ -542,6 +542,24 @@ mod tests {
     }
 
     #[test]
+    fn store_extract_display_names_encode_to_fixture_cp932() {
+        let cases = [
+            ("見積書_2026年10月.xlsx", "8CA990CF8F915F32303236944E31308C8E2E786C7378"),
+            (
+                "請求書/株式会社サンプル.pdf",
+                "90BF8B818F912F8A948EAE89EF8ED0835483938376838B2E706466",
+            ),
+            ("写真/現場_大阪.jpg", "8ECA905E2F8CBB8FEA5F91E58DE32E6A7067"),
+            ("議事録_10月定例.docx", "8B638E96985E5F31308C8E92E897E12E646F6378"),
+        ];
+        for (name, want) in cases {
+            let encoded = encode_entry_name(name);
+            assert_eq!(hex(&encoded.cp932), want, "{name}");
+            assert!(encoded.issues.is_empty(), "{name}");
+        }
+    }
+
+    #[test]
     fn nfd_ga_in_path_is_nfc_per_component() {
         let nfd: String = "書類/が.txt".nfd().collect();
         let encoded = encode_entry_name(&nfd);

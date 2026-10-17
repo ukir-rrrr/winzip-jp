@@ -15,7 +15,8 @@ describe("ストア用シーン", () => {
     assert.ok(!STORE_JUNK_PLAN.entries.some((name) => name.includes("__MACOSX")));
   });
 
-  it("解凍一覧の nameHex は表示名の CP932 で、bit 11 は落ちている", () => {
+  it("解凍一覧 fixture は zipcore が決めた CP932 hex と一致する", () => {
+    // バイト列の正は crates/zipcore の store_extract_display_names_encode_to_fixture_cp932。
     const cp932Hex: Record<string, string> = {
       "見積書_2026年10月.xlsx": "8ca990cf8f915f32303236944e31308c8e2e786c7378",
       "請求書/株式会社サンプル.pdf": "90bf8b818f912f8a948eae89ef8ed0835483938376838b2e706466",
@@ -26,7 +27,7 @@ describe("ストア用シーン", () => {
     assert.equal(STORE_EXTRACT_LIST.entries.length, Object.keys(cp932Hex).length);
     for (const entry of STORE_EXTRACT_LIST.entries) {
       assert.equal(entry.nameHex, cp932Hex[entry.displayName], entry.displayName);
-      assert.equal(entry.gpbf & 0x0800, 0, entry.displayName);
+      assert.equal(entry.gpbf, 0, entry.displayName);
     }
   });
 });
