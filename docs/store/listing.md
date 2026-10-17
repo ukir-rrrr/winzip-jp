@@ -22,14 +22,12 @@ pnpm --filter winzip-jp store-screenshots
 文字化けしないZIP
 <!-- /listing:name -->
 
-## サブタイトル候補（各 ≤30）
+## サブタイトル（採用・提出する 1 本、≤30）
 
-採用は riku が決める。1 本だけ提出する。
+riku が採用した。提出はこの 1 本だけ。
 
 <!-- listing:subtitles -->
 Windowsでも日本語が化けないZIP作成・解凍
-追加ソフトなしで相手のWindowsが開ける
-Macで作ってWindowsでそのまま解凍
 <!-- /listing:subtitles -->
 
 ## プロモーション用テキスト（≤170）
@@ -58,7 +56,7 @@ Windowsの取引先が、エクスプローラーの標準機能だけでその�
 
 ## キーワード（≤100、カンマ区切り、空白なし）
 
-アプリ名の語（文字化け／しない／ZIP）は繰り返さない。提出時に選んだサブタイトルの語も、枠を無駄にしないよう重ねない。
+アプリ名と採用サブタイトルの語（文字化け／しない／ZIP／Windows／日本語／化けない／作成／解凍）は繰り返さない。
 
 <!-- listing:keywords -->
 圧縮,アーカイブ,CP932,ShiftJIS,エクスプローラー,Mac,ファイル名,暗号化,分割,Finder,パスワード,展開,取引先,オフライン
@@ -73,14 +71,14 @@ Windowsの取引先が、エクスプローラーの標準機能だけでその�
 
 ## サポート URL / プライバシーポリシー URL
 
-プレースホルダ。提出前に riku が実 URL を置く。個人の販売者ページでよい。収集データが無い旨をプライバシーポリシーに書く。
+本文は `docs/support/` と `docs/privacy/`（GitHub Pages の公開フォルダを `/docs` にしたとき、次の URL になる）。この PR では Pages を有効化しない。有効化は riku がする。
 
 <!-- listing:support-url -->
-https://example.com/winzip-jp/support
+https://ukir-rrrr.github.io/winzip-jp/support/
 <!-- /listing:support-url -->
 
 <!-- listing:privacy-url -->
-https://example.com/winzip-jp/privacy
+https://ukir-rrrr.github.io/winzip-jp/privacy/
 <!-- /listing:privacy-url -->
 
 ## App Privacy（データ収集なし）
@@ -167,8 +165,6 @@ Mac で受理される 16:10。実アプリ UI（`VITE_E2E=1` のプレビュー
 
 ## riku が決めること
 
-1. サブタイトルを候補のどれにするか（または差し替え）。
-2. サポート URL とプライバシーポリシー URL の本番。
-3. `ITSAppUsesNonExemptEncryption`（A / B / C）。この文書は決めない。
-4. 第二カテゴリ（仕事効率化）を付けるか。
-5. キーワードを提出形に削るか（サブタイトル採用後）。
+1. GitHub Pages を有効化するか（公開フォルダ `/docs`。この PR では有効化しない）。
+2. `ITSAppUsesNonExemptEncryption`（A / B / C）。この文書は決めない。
+3. 第二カテゴリ（仕事効率化）を付けるか。

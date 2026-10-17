@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Check store listing copy and screenshot sizes
+      - name: Check store listing, pages, and screenshot sizes
         run: node docs/store/check-listing.mjs
 
   zipcore:

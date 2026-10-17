@@ -4,8 +4,21 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)));
+const docsRoot = resolve(root, "..");
 const md = readFileSync(resolve(root, "listing.md"), "utf8");
-const NAME_WORDS = ["文字化け", "しない", "ZIP"];
+const ADOPTED_SUBTITLE = "Windowsでも日本語が化けないZIP作成・解凍";
+const SUPPORT_URL = "https://ukir-rrrr.github.io/winzip-jp/support/";
+const PRIVACY_URL = "https://ukir-rrrr.github.io/winzip-jp/privacy/";
+const RESERVED_WORDS = [
+  "文字化け",
+  "しない",
+  "ZIP",
+  "Windows",
+  "日本語",
+  "化けない",
+  "作成",
+  "解凍",
+];
 
 function field(id) {
   const match = md.match(new RegExp(`<!-- listing:${id} -->([\\s\\S]*?)<!-- /listing:${id} -->`));
@@ -37,10 +50,9 @@ const subtitles = field("subtitles")
   .split("\n")
   .map((line) => line.trim())
   .filter(Boolean);
-check(subtitles.length >= 2, "サブタイトル候補が足りません");
-for (const line of subtitles) {
-  check(line.length <= 30, `サブタイトル ${line.length} 文字（≤30）: ${line}`);
-}
+check(subtitles.length === 1, `提出するサブタイトルは 1 本: ${subtitles.join(" / ")}`);
+check(subtitles[0] === ADOPTED_SUBTITLE, `採用サブタイトルと違う: ${subtitles[0]}`);
+check(subtitles[0].length <= 30, `サブタイトル ${subtitles[0].length} 文字（≤30）`);
 
 const promo = field("promo");
 check(promo.length > 0 && promo.length <= 170, `プロモーション ${promo.length} 文字（≤170）`);
@@ -67,17 +79,24 @@ check(!/\s/.test(keywords), `キーワードに空白があります: ${keywords
 check(keywords.length <= 100, `キーワード ${keywords.length} 文字（≤100）`);
 const tokens = keywords.split(",");
 check(tokens.every((token) => token.length > 0), "空のキーワードがあります");
-for (const word of NAME_WORDS) {
-  check(
-    !tokens.includes(word),
-    `キーワードがアプリ名の語「${word}」を繰り返しています`,
-  );
+const reserved = new Set(RESERVED_WORDS.map((word) => word.toLowerCase()));
+for (const token of tokens) {
+  check(!reserved.has(token.toLowerCase()), `キーワードが名前またはサブタイトルの語「${token}」を繰り返しています`);
 }
 
 const support = field("support-url");
 const privacy = field("privacy-url");
-check(/^https:\/\//.test(support), `サポート URL が https ではありません: ${support}`);
-check(/^https:\/\//.test(privacy), `プライバシー URL が https ではありません: ${privacy}`);
+check(support === SUPPORT_URL, `サポート URL が想定と違います: ${support}`);
+check(privacy === PRIVACY_URL, `プライバシー URL が想定と違います: ${privacy}`);
+
+const supportHtml = readFileSync(resolve(docsRoot, "support/index.html"), "utf8");
+const privacyHtml = readFileSync(resolve(docsRoot, "privacy/index.html"), "utf8");
+check(supportHtml.includes('lang="ja"'), "サポートページが日本語ではありません");
+check(supportHtml.includes("https://github.com/ukir-rrrr/winzip-jp/issues"), "サポートに Issues のリンクがありません");
+check(!/Support|Contact us|Click here/i.test(supportHtml), "サポートに英語 UI があります");
+check(privacyHtml.includes('lang="ja"'), "プライバシーページが日本語ではありません");
+check(privacyHtml.includes("収集しません"), "プライバシーに収集しない旨がありません");
+check(privacyHtml.includes("オフライン"), "プライバシーにオフラインの旨がありません");
 
 const skipShots = process.env.STORE_LISTING_SKIP_SHOTS === "1";
 const shotDir = resolve(root, "screenshots");
