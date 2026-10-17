@@ -96,7 +96,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Sandbox E2E (ad-hoc sign, --e2e-open, S1)
         run: bash apps/winzip-jp/scripts/sandbox-e2e.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: sandbox-e2e
@@ -130,7 +130,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: App Store bundle to .pkg (--no-upload)
         run: bash apps/winzip-jp/scripts/appstore-pkg.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: appstore-pkg
@@ -202,13 +202,13 @@ jobs:
           open "${APP}"
           sleep 6
           screencapture -x apps/winzip-jp/e2e/artifacts/s1-tauri-window.png || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: e2e-screenshots
           path: apps/winzip-jp/e2e/artifacts/
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: store-screenshots
