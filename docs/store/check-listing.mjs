@@ -62,17 +62,14 @@ check(
   description.length > 0 && description.length <= 4000,
   `説明 ${description.length} 文字（≤4000）`,
 );
-for (const lead of [
-  "そのまま開ける",
-  "追加",
-  "Apple Silicon",
-  ".DS_Store",
-  "__MACOSX",
-  "文字化け",
-  "7-Zip",
-]) {
-  check(description.includes(lead), `説明の先頭要件に「${lead}」がありません`);
+const firstPara = description.split(/\n\n/)[0] ?? "";
+let from = 0;
+for (const lead of ["そのまま開ける", "追加", "Apple Silicon", ".DS_Store", "__MACOSX", "文字化け"]) {
+  const at = firstPara.indexOf(lead, from);
+  check(at >= 0, `説明の先頭がこの順で「${lead}」を含みません`);
+  from = at + lead.length;
 }
+check(description.includes("7-Zip"), "説明に 7-Zip の注意がありません");
 
 const keywords = field("keywords");
 check(!/\s/.test(keywords), `キーワードに空白があります: ${keywords}`);

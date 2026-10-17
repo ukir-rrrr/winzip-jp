@@ -3,7 +3,7 @@
 提出先は日本の Mac App Store。販売者タイプは個人。価格は買い切り **¥900**（有料アプリ。非消費型 IAP にはしない）。
 本文はすべて日本語。英語の併記はしない。
 
-文字数は App Store Connect の「文字」カウント（書記素ではなく UTF-16 コードユニットではなく、このリポジトリでは JS の `string.length` = UTF-16 コードユニット）。絵文字は使わない。検証は `node docs/store/check-listing.mjs`。
+文字数の検証は JS の `string.length`（UTF-16 コードユニット）。App Store Connect の表示も同じ目安として扱う。絵文字は使わない。検証は `node docs/store/check-listing.mjs`。
 
 スクリーンショットの再生成:
 
@@ -12,7 +12,7 @@ VITE_E2E=1 pnpm --filter winzip-jp build
 pnpm --filter winzip-jp store-screenshots
 ```
 
-出力は `docs/store/screenshots/`（2880×1800）。CI は同じ手順で artifact `store-screenshots` に上げる。
+出力は `docs/store/screenshots/`（2880×1800）。リポジトリに置く PNG は Linux（Noto Sans CJK JP）で作った。CI の macos-15（Hiragino）で作り直したものを artifact `store-screenshots` に上げ、提出用はそちらを正とする。CI はサイズだけ見る。フォントが違うのでピクセル一致は見ない。
 
 ---
 

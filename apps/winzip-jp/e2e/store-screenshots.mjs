@@ -180,8 +180,9 @@ function pngSize(buf) {
 
 const preview = await startPreviewIfNeeded();
 mkdirSync(outDir, { recursive: true });
-const browser = await launchBrowser();
+let browser;
 try {
+  browser = await launchBrowser();
   await waitForHttp(previewUrl);
   const capture = await browser.newPage({
     viewport: { width: 1320, height: 760 },
@@ -233,7 +234,7 @@ try {
     console.log(`wrote ${dest}`);
   }
 } finally {
-  await browser.close();
+  await browser?.close();
   if (preview && typeof preview.kill === "function") {
     preview.kill("SIGTERM");
   }
