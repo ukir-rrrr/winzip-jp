@@ -123,33 +123,11 @@ Made for Kids → **いいえ**
 
 結果の目安は **4+**。最終ラベルは Connect が出す。
 
-## 輸出コンプライアンス（`ITSAppUsesNonExemptEncryption`）
+## 輸出コンプライアンス（App Store Connect で答える）
 
-本アプリは、ユーザが選んだときに **AES-256（WinZip AE-2）でファイルを暗号化する**。HTTPS のためだけではない。判断は riku がする。この文書は決めない。
+本アプリは、ユーザが選んだときに **AES-256（WinZip AE-2）でファイルを暗号化する**。HTTPS のためだけではない。
 
-現在の `apps/winzip-jp/src-tauri/Info.plist` は `true` になっている。これは実装の初期値であり、提出の最終回答ではない。
-
-### 選択肢 A: `false`（免除）
-
-- 意味: 使う暗号化は免除対象だけ、と宣言する。
-- 免除の例: HTTPS、認証、デジタル署名、OS 標準のディスク暗号化。
-- 年次の自己分類報告が不要なことが多い。
-- 注意: ユーザファイルを AES-256 で暗号化する用途は、よくある免除（通信の HTTPS だけ、など）には当たりにくい。誤って `false` にすると審査や輸出規制の手続きで問題になり得る。
-
-### 選択肢 B: `true`（非免除）
-
-- 意味: 免除されない暗号化を使う、と宣言する。
-- App Store Connect の輸出コンプライアンス質問に答える。
-- 米国 BIS への年次自己分類報告（Annual Self Classification Report）が必要になることがある。
-- 一部の国向けに追加の書類が要ることがある。
-- いまの Info.plist / ポリシーテストはこの値を見ている。提出で B にするなら、キーはそのままでよい。
-
-### 選択肢 C: 1.0 から AES を外す
-
-- パスワード付き ZIP を次版に送る。暗号化質問を避けたいときの道。
-- 設計上は MVP に AES を残している。外すなら Info.plist を `false` にし、ポリシーテストも直す。
-
-提出前に、弁護士または Apple の輸出コンプライアンス案内を見て決める。エージェントはどれにも決めない。
+`apps/winzip-jp/src-tauri/Info.plist` に `ITSAppUsesNonExemptEncryption` は置かない。`true` を付けると Transporter Error 90592（Invalid Export Compliance Code）になる。回答は App Store Connect の輸出コンプライアンス質問で行う。手順は `docs/release/submit-guide.md` の §9。Connect での文言は riku が決める。
 
 ## スクリーンショット（2880×1800）
 
@@ -166,5 +144,5 @@ Mac で受理される 16:10。実アプリ UI（`VITE_E2E=1` のプレビュー
 ## riku が決めること
 
 1. GitHub Pages を有効化するか（公開フォルダ `/docs`。この PR では有効化しない）。
-2. `ITSAppUsesNonExemptEncryption`（A / B / C）。この文書は決めない。
+2. App Store Connect の輸出コンプライアンス質問への回答。Info.plist に `ITSAppUsesNonExemptEncryption=true` は置かない。
 3. 第二カテゴリ（仕事効率化）を付けるか。

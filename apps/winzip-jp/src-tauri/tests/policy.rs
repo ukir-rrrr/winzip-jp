@@ -11,6 +11,36 @@ fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("{} を読めません: {e}", path.display()))
 }
 
+fn document_type_dicts(xml: &str) -> Vec<String> {
+    let marker = "<key>CFBundleDocumentTypes</key>";
+    let Some(idx) = xml.find(marker) else {
+        return Vec::new();
+    };
+    let after = &xml[idx + marker.len()..];
+    let Some(array_start) = after.find("<array>") else {
+        return Vec::new();
+    };
+    let mut rest = &after[array_start + 7..];
+    let mut out = Vec::new();
+    loop {
+        let Some(dict_start) = rest.find("<dict>") else {
+            break;
+        };
+        if let Some(array_end) = rest.find("</array>") {
+            if array_end < dict_start {
+                break;
+            }
+        }
+        rest = &rest[dict_start + 6..];
+        let Some(dict_end) = rest.find("</dict>") else {
+            break;
+        };
+        out.push(rest[..dict_end].to_string());
+        rest = &rest[dict_end + 7..];
+    }
+    out
+}
+
 fn plist_entries(xml: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut rest = xml;
@@ -237,15 +267,27 @@ fn cargo_does_not_depend_on_persisted_scope() {
 }
 
 #[test]
-fn info_plist_sets_encryption_and_utility_category() {
+fn info_plist_omits_encryption_flag_and_sets_utility_category() {
     let plist = read(&tauri_dir().join("Info.plist"));
     let entries = plist_entries(&plist);
     assert!(
-        entries
-            .iter()
-            .any(|(k, v)| k == "ITSAppUsesNonExemptEncryption" && v == "true"),
-        "AES-256 があるので非免除の暗号化あり: {entries:?}"
+        !plist.contains("ITSAppUsesNonExemptEncryption")
+            && !entries
+                .iter()
+                .any(|(k, v)| k == "ITSAppUsesNonExemptEncryption" && v == "true"),
+        "輸出コンプライアンスは App Store Connect で答える。Info.plist に ITSAppUsesNonExemptEncryption=true を置かない: {entries:?}"
     );
+    for name in [
+        "tauri.conf.json",
+        "tauri.appstore.conf.json",
+        "tauri.e2e.conf.json",
+    ] {
+        let text = read(&tauri_dir().join(name));
+        assert!(
+            !text.contains("ITSAppUsesNonExemptEncryption"),
+            "{name} に ITSAppUsesNonExemptEncryption を置かない"
+        );
+    }
     assert!(
         entries.iter().any(|(k, v)| {
             k == "LSApplicationCategoryType" && v == "public.app-category.utilities"
@@ -285,6 +327,55 @@ fn info_plist_sets_encryption_and_utility_category() {
             .as_str()
             .expect("infoPlist");
         assert!(info.ends_with("Info.plist"), "{name}: {info}");
+    }
+}
+
+#[test]
+fn info_plist_document_types_all_have_ls_handler_rank() {
+    let plist = read(&tauri_dir().join("Info.plist"));
+    let types = document_type_dicts(&plist);
+    assert!(
+        !types.is_empty(),
+        "CFBundleDocumentTypes が空、またはパースできない"
+    );
+    assert!(
+        types.iter().any(|dict| {
+            plist_entries(dict)
+                .iter()
+                .any(|(k, v)| k == "CFBundleTypeName" && v == "分割 ZIP ピース")
+        }),
+        "CFBundleTypeName「分割 ZIP ピース」が無い"
+    );
+    for dict in &types {
+        let entries = plist_entries(dict);
+        let name = entries
+            .iter()
+            .find(|(k, _)| k == "CFBundleTypeName")
+            .map(|(_, v)| v.as_str())
+            .unwrap_or("?");
+        let rank = entries
+            .iter()
+            .find(|(k, _)| k == "LSHandlerRank")
+            .map(|(_, v)| v.as_str());
+        assert!(
+            rank.is_some(),
+            "CFBundleDocumentTypes の「{name}」に LSHandlerRank が無い（Warning 90788）"
+        );
+        let rank = rank.expect("LSHandlerRank");
+        assert!(
+            matches!(rank, "Owner" | "Alternate" | "Default" | "None"),
+            "「{name}」の LSHandlerRank が不正: {rank}"
+        );
+        let zip_type = name == "ZIP アーカイブ"
+            || name == "分割 ZIP ピース"
+            || dict.contains("<string>zip</string>")
+            || dict.contains("<string>z01</string>");
+        if zip_type {
+            assert_eq!(
+                rank, "Alternate",
+                "ZIP 系「{name}」の LSHandlerRank は Alternate（Owner は自前型だけ）"
+            );
+        }
     }
 }
 
@@ -449,6 +540,13 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
         "Info.plist 欠落をスキップしない"
     );
     assert!(
+        pkg.contains("ITSAppUsesNonExemptEncryption")
+            && pkg.contains("if grep -q ITSAppUsesNonExemptEncryption")
+            && !pkg.contains("if ! grep -q ITSAppUsesNonExemptEncryption")
+            && pkg.contains("輸出コンプライアンスは App Store Connect"),
+        "提出スクリプトは ITSAppUsesNonExemptEncryption を拒否する"
+    );
+    assert!(
         !pkg.contains("if strings \"$BIN\" | grep"),
         "strings|grep の pipefail fail-open にしない"
     );
@@ -513,11 +611,18 @@ fn mas_team_id_is_wired_in_design_and_submit_guide() {
         "DSA",
         "Transporter",
         "ITSAppUsesNonExemptEncryption",
+        "90592",
         "apps/winzip-jp/scripts/appstore-pkg.sh",
         "docs/store/listing.md",
     ] {
         assert!(guide.contains(needle), "提出ガイドに「{needle}」が無い");
     }
+    assert!(
+        guide.contains("App Store Connect")
+            && guide.contains("ITSAppUsesNonExemptEncryption")
+            && !guide.contains("今の Info.plist は **`true`**"),
+        "提出ガイドは輸出コンプライアンスを Connect で答え、Info.plist の true を残さない"
+    );
     assert!(
         !guide.contains("BEGIN PRIVATE KEY")
             && !guide.contains("-----BEGIN")

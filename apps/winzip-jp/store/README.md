@@ -8,5 +8,5 @@
 - `screenshots/s5-1280x800.png` — 解凍モード
 
 実機（サンドボックス起動）の S1 は CI artifact `s1-sandbox.png` を正とします。
-`ITSAppUsesNonExemptEncryption` の提出判断は `docs/store/listing.md` に選択肢だけ書いてあり、決めない。
+輸出コンプライアンスは App Store Connect で答える。Info.plist に `ITSAppUsesNonExemptEncryption=true` は置かない。
 このリポジトリの CI は `.pkg` まで作り、App Store へはアップロードしません。
