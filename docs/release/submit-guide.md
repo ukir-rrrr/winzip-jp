@@ -164,7 +164,7 @@ cp "$HOME/Downloads/"*.provisionprofile \
    - User Access: Full Access
 3. Create
 
-バージョンはリポジトリの `apps/winzip-jp/src-tauri/tauri.conf.json` が今 `0.1.0`。初回を `1.0.0` にしたければ先にバージョンを上げてからビルドする（このガイドでは変えない）。
+バージョンはリポジトリの `apps/winzip-jp/src-tauri/tauri.conf.json`・`apps/winzip-jp/package.json`・`apps/winzip-jp/src-tauri/Cargo.toml` が `1.0.0`。App Store Connect のバージョンは **1.0**。ビルド後の `CFBundleShortVersionString` / `CFBundleVersion` も `1.0.0` になる（Connect の 1.0 と対応する）。
 
 ---
 

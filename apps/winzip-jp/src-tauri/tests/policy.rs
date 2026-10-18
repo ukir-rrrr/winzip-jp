@@ -318,6 +318,57 @@ fn display_name_is_user_facing_and_identifier_unchanged() {
 }
 
 #[test]
+fn first_release_version_is_1_0_0() {
+    const RELEASE: &str = "1.0.0";
+    let json: serde_json::Value =
+        serde_json::from_str(&read(&tauri_dir().join("tauri.conf.json"))).unwrap();
+    assert_eq!(
+        json["version"].as_str(),
+        Some(RELEASE),
+        "tauri.conf.json の version は初回リリース 1.0.0"
+    );
+    for name in ["tauri.appstore.conf.json", "tauri.e2e.conf.json"] {
+        let override_json: serde_json::Value =
+            serde_json::from_str(&read(&tauri_dir().join(name))).expect(name);
+        if let Some(version) = override_json.get("version") {
+            assert_eq!(
+                version.as_str(),
+                Some(RELEASE),
+                "{name} の version 上書きが 1.0.0 ではない"
+            );
+        }
+    }
+    let cargo = read(&tauri_dir().join("Cargo.toml"));
+    assert!(
+        cargo.contains(&format!("version = \"{RELEASE}\"")),
+        "src-tauri/Cargo.toml の package version は 1.0.0"
+    );
+    let package: serde_json::Value =
+        serde_json::from_str(&read(&tauri_dir().join("../package.json"))).unwrap();
+    assert_eq!(
+        package["version"].as_str(),
+        Some(RELEASE),
+        "apps/winzip-jp/package.json の version は 1.0.0"
+    );
+    let plist = read(&tauri_dir().join("Info.plist"));
+    let entries = plist_entries(&plist);
+    for key in ["CFBundleShortVersionString", "CFBundleVersion"] {
+        if let Some((_, value)) = entries.iter().find(|(k, _)| k == key) {
+            assert_eq!(value, RELEASE, "Info.plist の {key} は 1.0.0");
+        }
+    }
+    let guide = read(&tauri_dir().join("../../../docs/release/submit-guide.md"));
+    assert!(
+        guide.contains("`1.0.0`") && guide.contains("**1.0**"),
+        "提出ガイドがリポジトリ 1.0.0 と Connect 1.0 を前提にすること"
+    );
+    assert!(
+        !guide.contains("`0.1.0`"),
+        "提出ガイドにアプリ版 0.1.0 を残さない"
+    );
+}
+
+#[test]
 fn e2e_open_is_cfg_gated_in_source() {
     let lib = read(&tauri_dir().join("src/lib.rs"));
     assert!(
