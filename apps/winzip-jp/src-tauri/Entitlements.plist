@@ -11,10 +11,10 @@
 	<!-- WKWebView の WebContent がローカル IPC に outgoing を要求する。アプリ層の HTTP は持たない。 -->
 	<key>com.apple.security.network.client</key>
 	<true/>
-	<!-- 設計 §4.1 の placeholder。提出用の実値はプロビジョニング側。 -->
+	<!-- 設計 §4.1。Team ID は個人アカウント CHSRTG92SZ。 -->
 	<key>com.apple.application-identifier</key>
-	<string>$TEAM_ID.jp.riku.winzip</string>
+	<string>CHSRTG92SZ.jp.riku.winzip</string>
 	<key>com.apple.developer.team-identifier</key>
-	<string>$TEAM_ID</string>
+	<string>CHSRTG92SZ</string>
 </dict>
 </plist>

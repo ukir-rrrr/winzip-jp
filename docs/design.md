@@ -432,9 +432,9 @@ AES のパスワードは **UTF-8 バイト**（WinZip / 7-Zip と同じ）。�
 <key>com.apple.security.files.bookmarks.app-scope</key><true/>
 <key>com.apple.security.network.client</key><true/>
 <key>com.apple.application-identifier</key>
-<string>$TEAM_ID.jp.riku.winzip</string>
+<string>CHSRTG92SZ.jp.riku.winzip</string>
 <key>com.apple.developer.team-identifier</key>
-<string>$TEAM_ID</string>
+<string>CHSRTG92SZ</string>
 ```
 
 `com.apple.security.files.downloads.read-write` やホーム包括は付けない。一時ファイルはコンテナの `NSTemporaryDirectory` だけ。`network.server` は付けない。`network.client` は WKWebView の WebContent がローカル IPC に outgoing を要求するためだけで、アプリ層の HTTP クライアントは持たない（N10）。
@@ -486,7 +486,7 @@ stopAccessing
 - `tauri-plugin-fs` のスコープは `$TEMP`（コンテナ）と、コマンド引数で渡ってきたパスだけ。`$HOME/**` をコンフィグに書かない
 - コマンド層で「今回 startAccessing したルートの配下か」を検証してから `std::fs`
 - 開発用 `tauri.conf.json` はサンドボックスなしでも起動できる
-- 提出用 `tauri.appstore.conf.json` だけが entitlements と provisioning を読む
+- 提出用 `tauri.appstore.conf.json` だけが entitlements と `signingIdentity`（`Apple Distribution`。Team `CHSRTG92SZ` は `appstore-pkg.sh` が解決）を読む。プロビジョニングプロファイルはリポジトリに置かず、提出時だけローカルパスで埋め込む
 
 ---
 
@@ -959,7 +959,7 @@ PR 0→5 が「文字化けしない作成・解凍」。6–7 が MVP の残オ
 5. **`ITSAppUsesNonExemptEncryption`**
 6. **不能文字をユーザーが拒否できるか**。既定は「確認して作る」（拒否ボタンあり）
 7. **解凍時の `.DS_Store` をスキップするか**。作成時は除外、解凍時は「ジャンク表示オフ」既定でスキップする案
-8. Apple Developer Team ID / カテゴリ（Utility で進める）
+8. **Apple Developer Team ID**（決定）。個人アカウント `CHSRTG92SZ`。Bundle ID は `jp.riku.winzip`。提出用 `signingIdentity` は `Apple Distribution`（実体はキーチェーンの `Apple Distribution: <氏名> (CHSRTG92SZ)`。`apps/winzip-jp/scripts/appstore-pkg.sh` が Team ID で解決する）。カテゴリは Utility。手順は `docs/release/submit-guide.md`
 9. 圧縮レベルデフォルト（6 vs 最大）。ベンチ後
 
 ### 9.3 意図的にやらないこと（再掲）

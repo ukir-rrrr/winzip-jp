@@ -18,6 +18,10 @@ apps/winzip-jp/src-tauri/gen/
 
 *.p12
 *.p8
+*.cer
+*.certSigningRequest
 *.mobileprovision
 *.provisionprofile
+**/embedded.provisionprofile
+AuthKey_*.p8
 .env
