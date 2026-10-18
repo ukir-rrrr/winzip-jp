@@ -291,45 +291,21 @@ App Store Connect の macOS バージョン（日本語）を開き、`docs/stor
 
 ---
 
-## 9. 輸出コンプライアンス（`ITSAppUsesNonExemptEncryption`）
+## 9. 輸出コンプライアンス（App Store Connect で答える）
 
-本アプリは、ユーザが選んだときに **AES-256（WinZip AE-2）でユーザのファイルを暗号化する**。HTTPS のためだけではない。既定はオフだが、機能として入っている。
+Transporter の **Error 90592（Invalid Export Compliance Code）** を避けるため、`apps/winzip-jp/src-tauri/Info.plist` に `ITSAppUsesNonExemptEncryption` を**置かない**。`true` を付けると、免除コードが無い／無効な提出になり 90592 になる。輸出コンプライアンスは **App Store Connect** の質問で答える。
 
-App Store Connect の質問と `apps/winzip-jp/src-tauri/Info.plist` のキーを揃える。今の Info.plist は **`true`**。これは実装の初期値であり、提出の最終回答ではない。最終は **riku が決める**。弁護士または [Apple の輸出コンプライアンス案内](https://developer.apple.com/documentation/security/complying-with-encryption-export-regulations) を見てよい。
+本アプリは、ユーザが選んだときに **AES-256（WinZip AE-2）でユーザのファイルを暗号化する**。HTTPS のためだけではない。既定はオフだが、機能として入っている。最終の文言は **riku が決める**。弁護士または [Apple の輸出コンプライアンス案内](https://developer.apple.com/documentation/security/complying-with-encryption-export-regulations) を見てよい。
 
-### 選択肢
-
-| | 意味 | 向いているとき |
-| --- | --- | --- |
-| **A. `false`（免除）** | 使う暗号化は免除対象だけ、と宣言する | HTTPS・認証・署名・OS のディスク暗号化だけ、と言えるとき |
-| **B. `true`（非免除）** | 免除されない暗号化を使う、と宣言する | 今の Info.plist。AES-256 でユーザファイルを暗号化すると認める |
-| **C. 1.0 から AES を外す** | パスワード付き ZIP を次版に送る | 暗号化質問を避けたいとき。設計上は MVP に AES を残している |
-
-免除の例は通信の HTTPS、認証、デジタル署名、OS 標準のディスク暗号化。ユーザが選んだファイルを AES-256 で ZIP に書く用途は、よくある免除には当たりにくい。誤って **A** にすると、審査や輸出規制の手続きで問題になり得る。
-
-**B** にすると、Connect の輸出コンプライアンス質問に答える。米国 BIS への年次自己分類報告（Annual Self Classification Report）が要ることがある。国によっては追加の書類がある。
-
-**C** にするなら Info.plist を `false` にし、ポリシーテストも直し、AES UI を外す。このガイドの範囲外。
-
-### 推奨（決定ではない）
-
-**B（`true`）を推奨する。** 理由は次だけである。
-
-- 製品はユーザファイルの AES-256 を実装している。通信の HTTPS だけ、とは言えない
-- 今の Info.plist とポリシーテストは `true`
-- 誤って `false` にする方が、あとの修正より重い
-
-年次報告の手間を嫌うなら、弁護士に確認したうえで A にするか、C で AES を外す。エージェントはどれにも確定しない。
-
-Connect 側の操作（B のとき）:
+Connect 側の操作:
 
 1. そのバージョンの **App Encryption Documentation** / 輸出コンプライアンス
 2. 「輸出コンプライアンス情報は利用できますか」→ 使う暗号化がある、と進む
 3. 免除対象だけか、と聞かれたら **いいえ**（ユーザファイルの AES-256）
 4. 年次自己分類などの追加質問に、Apple の画面の説明どおり答える
-5. Info.plist が `true` のままであることを確認してからビルドし直す（6. をやり直す）
+5. ビルドした Info.plist に `ITSAppUsesNonExemptEncryption` が**無い**ことを確認してから 6. をやり直す（キーを足して作り直さない）
 
-A にしたときだけ、Info.plist の `ITSAppUsesNonExemptEncryption` を `false` に変えてから 6. をやり直す。
+免除の例は通信の HTTPS、認証、デジタル署名、OS 標準のディスク暗号化。ユーザが選んだファイルを AES-256 で ZIP に書く用途は、よくある免除には当たりにくい。Connect で「免除だけ」と答えるなら、弁護士に確認する。年次自己分類報告（Annual Self Classification Report）が要ることがある。
 
 ---
 
@@ -350,7 +326,7 @@ A にしたときだけ、Info.plist の `ITSAppUsesNonExemptEncryption` を `fa
 ビルドがバージョンに付き、掲載文・スクリーンショット・価格・入手可能性・プライバシー・輸出コンプライアンスが揃ってから:
 
 1. その macOS バージョンで **審査へ提出**
-2. 輸出コンプライアンスの最終確認が出たら、9. で決めた答えと矛盾しないこと
+2. 輸出コンプライアンスの最終確認が出たら、9. で Connect に答えた内容と矛盾しないこと。Info.plist に `ITSAppUsesNonExemptEncryption=true` を足して再提出しない
 3. 広告識別子は使っていない
 4. 審査メモ（任意）の例:
 
@@ -372,6 +348,7 @@ A にしたときだけ、Info.plist の `ITSAppUsesNonExemptEncryption` を `fa
 - Intel / ユニバーサルバイナリを `--target universal-apple-darwin` で作る
 - Developer ID 証明書でストア用 `.pkg` に署名する
 - `codesign --deep` を付ける（WKWebView ヘルパーが壊れる）
+- Info.plist に `ITSAppUsesNonExemptEncryption=true` を書く（Transporter Error 90592）
 
 ---
 
@@ -383,4 +360,5 @@ A にしたときだけ、Info.plist の `ITSAppUsesNonExemptEncryption` を `fa
 | プロファイルが無いと落ちる | `APPSTORE_PROVISION_PROFILE` のパス。ファイルを git に入れていないか |
 | Transporter が署名エラー | `.pkg` が Mac Installer Distribution で署名されているか。`pkgutil --check-signature` |
 | Connect にビルドが出ない | 同じチームか。Bundle ID が `jp.riku.winzip` か。待ってから再読み込み |
+| Transporter Error 90592 | Info.plist に `ITSAppUsesNonExemptEncryption=true` がある。キーを外して 6. をやり直す。輸出コンプライアンスは Connect で答える |
 | サンドボックスで即終了 | 提出用ではなく `sandbox-e2e.sh` の話。ad-hoc に Team ID が残ると SIGKILL する |

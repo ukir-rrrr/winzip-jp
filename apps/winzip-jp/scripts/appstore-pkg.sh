@@ -97,8 +97,8 @@ if [[ ! -f "$INFO" ]]; then
   echo "Info.plist がありません: $INFO" >&2
   exit 1
 fi
-if ! grep -q ITSAppUsesNonExemptEncryption "$INFO"; then
-  echo "Info.plist に ITSAppUsesNonExemptEncryption がありません" >&2
+if grep -q ITSAppUsesNonExemptEncryption "$INFO"; then
+  echo "Info.plist に ITSAppUsesNonExemptEncryption があります。輸出コンプライアンスは App Store Connect で答える" >&2
   exit 1
 fi
 if ! grep -q public.app-category.utilities "$INFO"; then

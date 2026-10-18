@@ -237,15 +237,24 @@ fn cargo_does_not_depend_on_persisted_scope() {
 }
 
 #[test]
-fn info_plist_sets_encryption_and_utility_category() {
+fn info_plist_omits_encryption_flag_and_sets_utility_category() {
     let plist = read(&tauri_dir().join("Info.plist"));
     let entries = plist_entries(&plist);
     assert!(
-        entries
-            .iter()
-            .any(|(k, v)| k == "ITSAppUsesNonExemptEncryption" && v == "true"),
-        "AES-256 があるので非免除の暗号化あり: {entries:?}"
+        !plist.contains("ITSAppUsesNonExemptEncryption"),
+        "輸出コンプライアンスは App Store Connect で答える。Info.plist に ITSAppUsesNonExemptEncryption を置かない"
     );
+    for name in [
+        "tauri.conf.json",
+        "tauri.appstore.conf.json",
+        "tauri.e2e.conf.json",
+    ] {
+        let text = read(&tauri_dir().join(name));
+        assert!(
+            !text.contains("ITSAppUsesNonExemptEncryption"),
+            "{name} に ITSAppUsesNonExemptEncryption を置かない"
+        );
+    }
     assert!(
         entries.iter().any(|(k, v)| {
             k == "LSApplicationCategoryType" && v == "public.app-category.utilities"
@@ -286,6 +295,39 @@ fn info_plist_sets_encryption_and_utility_category() {
             .expect("infoPlist");
         assert!(info.ends_with("Info.plist"), "{name}: {info}");
     }
+}
+
+#[test]
+fn info_plist_document_types_all_have_ls_handler_rank() {
+    let plist = read(&tauri_dir().join("Info.plist"));
+    let entries = plist_entries(&plist);
+    let names: Vec<&str> = entries
+        .iter()
+        .filter(|(k, _)| k == "CFBundleTypeName")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    let ranks: Vec<&str> = entries
+        .iter()
+        .filter(|(k, _)| k == "LSHandlerRank")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    assert!(
+        !names.is_empty(),
+        "CFBundleDocumentTypes の CFBundleTypeName が無い"
+    );
+    assert_eq!(
+        names.len(),
+        ranks.len(),
+        "CFBundleDocumentTypes の各エントリに LSHandlerRank が必要（Warning 90788）: names={names:?} ranks={ranks:?}"
+    );
+    assert!(
+        names.contains(&"分割 ZIP ピース"),
+        "CFBundleTypeName「分割 ZIP ピース」が無い: {names:?}"
+    );
+    assert!(
+        ranks.iter().all(|rank| *rank == "Alternate"),
+        "ZIP 系の LSHandlerRank は Alternate（Owner は自前型だけ）: {ranks:?}"
+    );
 }
 
 #[test]
@@ -449,6 +491,11 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
         "Info.plist 欠落をスキップしない"
     );
     assert!(
+        pkg.contains("ITSAppUsesNonExemptEncryption があります")
+            && pkg.contains("輸出コンプライアンスは App Store Connect"),
+        "提出スクリプトは ITSAppUsesNonExemptEncryption を拒否する"
+    );
+    assert!(
         !pkg.contains("if strings \"$BIN\" | grep"),
         "strings|grep の pipefail fail-open にしない"
     );
@@ -513,11 +560,18 @@ fn mas_team_id_is_wired_in_design_and_submit_guide() {
         "DSA",
         "Transporter",
         "ITSAppUsesNonExemptEncryption",
+        "90592",
         "apps/winzip-jp/scripts/appstore-pkg.sh",
         "docs/store/listing.md",
     ] {
         assert!(guide.contains(needle), "提出ガイドに「{needle}」が無い");
     }
+    assert!(
+        guide.contains("App Store Connect")
+            && guide.contains("ITSAppUsesNonExemptEncryption")
+            && !guide.contains("今の Info.plist は **`true`**"),
+        "提出ガイドは輸出コンプライアンスを Connect で答え、Info.plist の true を残さない"
+    );
     assert!(
         !guide.contains("BEGIN PRIVATE KEY")
             && !guide.contains("-----BEGIN")

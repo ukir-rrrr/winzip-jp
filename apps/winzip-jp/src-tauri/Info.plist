@@ -6,8 +6,6 @@
 	<string>文字化けしないZIP</string>
 	<key>CFBundleName</key>
 	<string>文字化けしないZIP</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>CFBundleDocumentTypes</key>
@@ -29,6 +27,8 @@
 			<string>分割 ZIP ピース</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
 			<key>NSIsRelatedItemType</key>
 			<true/>
 			<key>CFBundleTypeExtensions</key>
