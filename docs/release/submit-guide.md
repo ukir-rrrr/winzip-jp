@@ -127,6 +127,8 @@ security find-identity -v
 6. Profile Name: `winzip-jp Mac App Store` → Generate
 7. **Download**
 
+Safari などブラウザで落とすと、ファイルに `com.apple.quarantine` が付く。`appstore-pkg.sh` がバンドルへコピーしたあと、コード署名の前に `xattr -cr` で剥がす。残ったまま `.pkg` に入ると Transporter エラー 91109 になる。
+
 保存先は次のどちらでもよい。**git add しない。**
 
 ```bash
@@ -230,6 +232,8 @@ codesign -d --entitlements :- "$APP"
 
 pkgutil --check-signature "$REPO/apps/winzip-jp/e2e/artifacts/winzip-jp.pkg"
 ls -lh "$APP/Contents/embedded.provisionprofile"
+xattr -l "$APP/Contents/embedded.provisionprofile" || true
+# com.apple.quarantine が無いこと（あると Transporter エラー 91109）
 ```
 
 ---
@@ -361,4 +365,5 @@ Connect 側の操作:
 | Transporter が署名エラー | `.pkg` が Mac Installer Distribution で署名されているか。`pkgutil --check-signature` |
 | Connect にビルドが出ない | 同じチームか。Bundle ID が `jp.riku.winzip` か。待ってから再読み込み |
 | Transporter Error 90592 | Info.plist に `ITSAppUsesNonExemptEncryption=true` がある。キーを外して 6. をやり直す。輸出コンプライアンスは Connect で答える |
+| Transporter Error 91109 | 埋め込みプロファイルに `com.apple.quarantine` が残っている。ブラウザで落とした `.provisionprofile` が原因。`appstore-pkg.sh` がコピー後・署名前に `xattr -cr` し、`.pkg` を `pkgutil --expand-full` して検査する。再発したら 6. をやり直す。手元確認は `xattr -l "$APPSTORE_PROVISION_PROFILE"` |
 | サンドボックスで即終了 | 提出用ではなく `sandbox-e2e.sh` の話。ad-hoc に Team ID が残ると SIGKILL する |

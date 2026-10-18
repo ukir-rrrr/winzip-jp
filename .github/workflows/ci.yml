@@ -128,8 +128,37 @@ jobs:
           cache: pnpm
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
+      - name: Plant quarantined dummy provision profile
+        run: |
+          set -euo pipefail
+          dummy="${RUNNER_TEMP}/winzip-jp-dummy.provisionprofile"
+          printf '%s\n' 'winzip-jp-ci-dummy-profile' > "$dummy"
+          xattr -w com.apple.quarantine "0081;00000000;Safari;" "$dummy"
+          xattr -p com.apple.quarantine "$dummy" >/dev/null
+          echo "APPSTORE_PROVISION_PROFILE=${dummy}" >> "$GITHUB_ENV"
       - name: App Store bundle to .pkg (--no-upload)
         run: bash apps/winzip-jp/scripts/appstore-pkg.sh
+      - name: Dummy profile in pkg must not carry quarantine
+        run: |
+          set -euo pipefail
+          dest="${RUNNER_TEMP}/winzip-jp-pkg-assert"
+          rm -rf "$dest"
+          pkgutil --expand-full apps/winzip-jp/e2e/artifacts/winzip-jp.pkg "$dest"
+          found=""
+          while IFS= read -r f; do
+            found="$f"
+            break
+          done < <(find "$dest" -name 'embedded.provisionprofile')
+          if [[ -z "$found" ]]; then
+            echo "embedded.provisionprofile が pkg にありません" >&2
+            exit 1
+          fi
+          grep -Fq 'winzip-jp-ci-dummy-profile' "$found"
+          if xattr -p com.apple.quarantine "$found" >/dev/null 2>&1; then
+            echo "ダミープロファイルに com.apple.quarantine が残っています" >&2
+            xattr -l "$found" >&2 || true
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

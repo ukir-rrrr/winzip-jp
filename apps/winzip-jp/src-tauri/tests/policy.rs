@@ -519,6 +519,27 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
         pkg.contains("APPSTORE_PROVISION_PROFILE") && pkg.contains("embedded.provisionprofile"),
         "プロファイルはローカルパスだけ。リポジトリには置かない"
     );
+    let xattr_at = pkg
+        .find("xattr -cr")
+        .expect("ブラウザ由来の quarantine を xattr -cr で剥がす");
+    let sign_at = pkg
+        .find("codesign --force")
+        .expect("提出用 codesign --force");
+    let expand_at = pkg
+        .find("pkgutil --expand-full")
+        .expect("pkg を expand-full して quarantine を検査する");
+    assert!(
+        xattr_at < sign_at,
+        "xattr -cr は codesign より前（Transporter 91109）"
+    );
+    assert!(
+        sign_at < expand_at,
+        "pkg の quarantine 検査は productbuild / codesign の後"
+    );
+    assert!(
+        pkg.contains("com.apple.quarantine") && pkg.contains("91109"),
+        "隔離属性の残存を Transporter 91109 として落とす"
+    );
     assert!(
         pkg.contains("skip upload (--no-upload)")
             && !pkg.contains("iTMSTransporter")
@@ -528,6 +549,14 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
     assert!(
         !pkg.contains("--deep"),
         "提出用 codesign にも --deep を使わない"
+    );
+    let ci = read(&tauri_dir().join("../../../.github/workflows/ci.yml"));
+    assert!(
+        ci.contains("Plant quarantined dummy provision profile")
+            && ci.contains("winzip-jp-ci-dummy-profile")
+            && ci.contains("com.apple.quarantine")
+            && ci.contains("APPSTORE_PROVISION_PROFILE"),
+        "tauri-appstore-pkg は隔離付きダミープロファイルで剥がしを検証する"
     );
 }
 
@@ -561,6 +590,8 @@ fn mas_team_id_is_wired_in_design_and_submit_guide() {
         "Transporter",
         "ITSAppUsesNonExemptEncryption",
         "90592",
+        "91109",
+        "com.apple.quarantine",
         "apps/winzip-jp/scripts/appstore-pkg.sh",
         "docs/store/listing.md",
     ] {
