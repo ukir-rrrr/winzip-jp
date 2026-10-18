@@ -1,6 +1,6 @@
 [package]
 name = "winzip-jp"
-version = "0.1.0"
+version = "1.0.0"
 description = "日本語版 Windows 向け ZIP を作る Mac アプリ"
 authors = ["winzip-jp"]
 edition = "2021"
