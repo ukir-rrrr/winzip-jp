@@ -138,6 +138,12 @@ fi
 # codesign にシールされると .pkg が拒否される。cp は macOS で xattr を引き継ぐ。
 # コピー後・署名前に .app 全体から剥がす。
 xattr -cr "$APP"
+if [[ "$NEED_PROFILE" -eq 1 ]] \
+  && xattr -p com.apple.quarantine "$APP/Contents/embedded.provisionprofile" >/dev/null 2>&1; then
+  echo "embedded.provisionprofile に com.apple.quarantine が残っています（Transporter エラー 91109）" >&2
+  xattr -l "$APP/Contents/embedded.provisionprofile" >&2 || true
+  exit 1
+fi
 
 if [[ -n "$DIST_IDENTITY" ]]; then
   # deep 署名は WKWebView ヘルパーにアプリ entitlements を押し付けるので使わない。
@@ -186,7 +192,8 @@ echo "pkg=$PKG ($(wc -c < "$PKG") bytes)"
 EXPAND_DIR="${ARTIFACTS}/pkg-expand"
 rm -rf "$EXPAND_DIR"
 pkgutil --expand-full "$PKG" "$EXPAND_DIR"
-QUARANTINE_HITS="$(xattr -lr "$EXPAND_DIR" | grep -F 'com.apple.quarantine' || true)"
+QUARANTINE_LIST="$(xattr -lr "$EXPAND_DIR")"
+QUARANTINE_HITS="$(printf '%s\n' "$QUARANTINE_LIST" | grep -F 'com.apple.quarantine' || true)"
 if [[ -n "$QUARANTINE_HITS" ]]; then
   echo "pkg に com.apple.quarantine が残っています（Transporter エラー 91109）:" >&2
   printf '%s\n' "$QUARANTINE_HITS" >&2
