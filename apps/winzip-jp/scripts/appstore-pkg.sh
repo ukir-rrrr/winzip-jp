@@ -38,7 +38,9 @@ if [[ -z "$INSTALLER_IDENTITY" ]]; then
 fi
 
 PROFILE="${APPSTORE_PROVISION_PROFILE:-$TAURI/embedded.provisionprofile}"
+NEED_PROFILE=0
 ADHOC_CFG=""
+EXPAND_DIR=""
 TAURI_CONFIGS=(--config src-tauri/tauri.appstore.conf.json)
 
 if [[ -n "$DIST_IDENTITY" ]]; then
@@ -54,6 +56,9 @@ fi
 cleanup() {
   if [[ -n "$ADHOC_CFG" ]]; then
     rm -f "$ADHOC_CFG"
+  fi
+  if [[ -n "$EXPAND_DIR" ]]; then
+    rm -rf "$EXPAND_DIR"
   fi
 }
 trap cleanup EXIT
@@ -114,13 +119,27 @@ if ! grep -q "$BUNDLE_ID" "$INFO"; then
   exit 1
 fi
 
+NEED_PROFILE=0
 if [[ -n "$DIST_IDENTITY" ]]; then
+  NEED_PROFILE=1
+elif [[ -n "${APPSTORE_PROVISION_PROFILE:-}" ]]; then
+  # CI が隔離属性付きダミーを渡し、コピー→剥がしを検証する。提出用署名ではない。
+  NEED_PROFILE=1
+fi
+if [[ "$NEED_PROFILE" -eq 1 ]]; then
   if [[ ! -f "$PROFILE" ]]; then
     echo "提出用署名には Mac App Store のプロビジョニングプロファイルが必要です。" >&2
     echo "APPSTORE_PROVISION_PROFILE を渡すか、${TAURI}/embedded.provisionprofile に置く（gitignore 済み）。" >&2
     exit 1
   fi
   cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
+fi
+# Transporter 91109: ブラウザで落としたプロファイルの com.apple.quarantine が
+# codesign にシールされると .pkg が拒否される。cp は macOS で xattr を引き継ぐ。
+# コピー後・署名前に .app 全体から剥がす。
+xattr -cr "$APP"
+
+if [[ -n "$DIST_IDENTITY" ]]; then
   # deep 署名は WKWebView ヘルパーにアプリ entitlements を押し付けるので使わない。
   codesign --force --options runtime \
     --entitlements "$TAURI/Entitlements.plist" \
@@ -163,5 +182,28 @@ if [[ ! -s "$PKG" ]]; then
   exit 1
 fi
 echo "pkg=$PKG ($(wc -c < "$PKG") bytes)"
+# productbuild は xattr をペイロードに残す。展開して quarantine が無いことを落とす。
+EXPAND_DIR="${ARTIFACTS}/pkg-expand"
+rm -rf "$EXPAND_DIR"
+pkgutil --expand-full "$PKG" "$EXPAND_DIR"
+QUARANTINE_HITS="$(xattr -lr "$EXPAND_DIR" | grep -F 'com.apple.quarantine' || true)"
+if [[ -n "$QUARANTINE_HITS" ]]; then
+  echo "pkg に com.apple.quarantine が残っています（Transporter エラー 91109）:" >&2
+  printf '%s\n' "$QUARANTINE_HITS" >&2
+  exit 1
+fi
+if [[ "$NEED_PROFILE" -eq 1 ]]; then
+  EMBEDDED_PROFILE=""
+  while IFS= read -r EMBEDDED_CANDIDATE; do
+    EMBEDDED_PROFILE="$EMBEDDED_CANDIDATE"
+    break
+  done < <(find "$EXPAND_DIR" -name 'embedded.provisionprofile')
+  if [[ -z "$EMBEDDED_PROFILE" ]]; then
+    echo "埋め込みプロファイルが pkg にありません" >&2
+    exit 1
+  fi
+fi
+rm -rf "$EXPAND_DIR"
+EXPAND_DIR=""
 # secrets があっても提出しない
 echo "skip upload (--no-upload)"
