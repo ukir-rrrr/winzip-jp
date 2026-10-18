@@ -668,8 +668,9 @@ OS レベルの D&D が再現しにくい場合は、同じ Tauri コマンド�
 通常 E2E は非サンドボックス debug ビルド。追加ジョブ:
 
 ```
-cargo tauri build --debug --config src-tauri/tauri.appstore.conf.json --bundles app
-codesign --entitlements Entitlements.plist --sign - winzip-jp.app
+# 提出用 tauri.appstore.conf.json を直接叩かない。
+# signingIdentity と Team ID 付き entitlements のまま ad-hoc すると SIGKILL する。
+bash apps/winzip-jp/scripts/sandbox-e2e.sh
 ```
 
 オープンダイアログは CI で操作しづらいので、アプリ引数 `--e2e-open <fixture>` を debug だけ許可し、そのパスは「ユーザーが選んだ」扱いで `startAccessing` する。`--e2e-open` は App Store ビルドでコンパイルされない（`cfg(e2e)`）。サンドボックスジョブは「コンテナ外のフィクスチャを読めて、ホーム配下の無関係なパスを読むと失敗する」を assert する。

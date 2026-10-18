@@ -376,6 +376,15 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
         !sh.contains("codesign --force --deep"),
         "codesign --deep は WebView ヘルパーを壊す"
     );
+    let package = read(&tauri_dir().join("../package.json"));
+    assert!(
+        package.contains("\"build:sandbox-e2e\": \"bash ./scripts/sandbox-e2e.sh\""),
+        "build:sandbox-e2e は提出用設定を直接読まない"
+    );
+    assert!(
+        package.contains("\"build:appstore\": \"bash ./scripts/appstore-pkg.sh\""),
+        "build:appstore は提出スクリプトを呼ぶ"
+    );
     let pkg = read(&tauri_dir().join("../scripts/appstore-pkg.sh"));
     assert!(pkg.contains("APP_NAME=\"文字化けしないZIP\"") && pkg.contains("${APP_NAME}.app"));
     assert!(!pkg.contains("送りZIP"));
