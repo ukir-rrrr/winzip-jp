@@ -11,7 +11,8 @@
       "entitlements": "Entitlements.plist",
       "hardenedRuntime": true,
       "minimumSystemVersion": "15.0",
-      "infoPlist": "Info.plist"
+      "infoPlist": "Info.plist",
+      "signingIdentity": "Apple Distribution"
     }
   }
 }

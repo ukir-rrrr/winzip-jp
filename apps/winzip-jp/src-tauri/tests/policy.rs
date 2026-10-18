@@ -59,11 +59,11 @@ fn appstore_entitlements_match_design_section_4_1() {
             ),
             (
                 "com.apple.application-identifier".into(),
-                "$TEAM_ID.jp.riku.winzip".into()
+                "CHSRTG92SZ.jp.riku.winzip".into()
             ),
             (
                 "com.apple.developer.team-identifier".into(),
-                "$TEAM_ID".into()
+                "CHSRTG92SZ".into()
             ),
         ]
     );
@@ -88,6 +88,15 @@ fn appstore_entitlements_match_design_section_4_1() {
     assert!(
         entitlements.ends_with("Entitlements.plist"),
         "{entitlements}"
+    );
+    assert_eq!(
+        json["bundle"]["macOS"]["signingIdentity"].as_str(),
+        Some("Apple Distribution"),
+        "提出用 signingIdentity は Apple Distribution（Team CHSRTG92SZ はスクリプトが解決）"
+    );
+    assert!(
+        !plist.contains("$TEAM_ID"),
+        "Entitlements.plist に $TEAM_ID プレースホルダを残さない"
     );
     assert!(
         json.get("plugins").is_none() || json["plugins"].get("persisted-scope").is_none(),
@@ -350,8 +359,10 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
         "find | head で別 .app を拾わない"
     );
     assert!(
-        sh.contains("data.pop(key") && sh.contains("grep -qF '$TEAM_ID'"),
-        "署名前に TEAM_ID キーを剥がし、署名後 XML でも残存を落とす"
+        sh.contains("data.pop(key")
+            && sh.contains("grep -qF '$TEAM_ID'")
+            && sh.contains("grep -qF 'CHSRTG92SZ'"),
+        "署名前に team-identifier を剥がし、プレースホルダと実 Team ID の残存を落とす"
     );
     assert!(
         !sh.contains("if ! sign"),
@@ -364,6 +375,15 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
     assert!(
         !sh.contains("codesign --force --deep"),
         "codesign --deep は WebView ヘルパーを壊す"
+    );
+    let package = read(&tauri_dir().join("../package.json"));
+    assert!(
+        package.contains("\"build:sandbox-e2e\": \"bash ./scripts/sandbox-e2e.sh\""),
+        "build:sandbox-e2e は提出用設定を直接読まない"
+    );
+    assert!(
+        package.contains("\"build:appstore\": \"bash ./scripts/appstore-pkg.sh\""),
+        "build:appstore は提出スクリプトを呼ぶ"
     );
     let pkg = read(&tauri_dir().join("../scripts/appstore-pkg.sh"));
     assert!(pkg.contains("APP_NAME=\"文字化けしないZIP\"") && pkg.contains("${APP_NAME}.app"));
@@ -380,5 +400,77 @@ fn sandbox_e2e_script_pins_app_and_strips_team_id_before_sign() {
     assert!(
         !pkg.contains("if strings \"$BIN\" | grep"),
         "strings|grep の pipefail fail-open にしない"
+    );
+    assert!(
+        pkg.contains("TEAM_ID=\"CHSRTG92SZ\"") && pkg.contains("BUNDLE_ID=\"jp.riku.winzip\""),
+        "提出スクリプトに Team ID と Bundle ID を固定する"
+    );
+    assert!(
+        pkg.contains("Apple Distribution")
+            && pkg.contains("Mac Installer Distribution")
+            && pkg.contains("3rd Party Mac Developer Installer")
+            && pkg.contains("security find-identity -v 2>/dev/null || true"),
+        "提出用証明書を Team ID で探し、一覧失敗で CI を落とさない"
+    );
+    assert!(
+        pkg.contains("APPLE_SIGNING_IDENTITY")
+            && pkg.contains(r#"{"bundle":{"macOS":{"signingIdentity":"-"}}}"#),
+        "証明書が無い CI では signingIdentity を ad-hoc に落とす"
+    );
+    assert!(
+        pkg.contains("APPSTORE_PROVISION_PROFILE") && pkg.contains("embedded.provisionprofile"),
+        "プロファイルはローカルパスだけ。リポジトリには置かない"
+    );
+    assert!(
+        pkg.contains("skip upload (--no-upload)")
+            && !pkg.contains("iTMSTransporter")
+            && !pkg.contains("altool"),
+        "スクリプトは upload しない"
+    );
+    assert!(
+        !pkg.contains("--deep"),
+        "提出用 codesign にも --deep を使わない"
+    );
+}
+
+#[test]
+fn mas_team_id_is_wired_in_design_and_submit_guide() {
+    let root = tauri_dir().join("../../..");
+    let design = read(&root.join("docs/design.md"));
+    assert!(
+        design.contains("CHSRTG92SZ.jp.riku.winzip") && design.contains("<string>CHSRTG92SZ</string>"),
+        "設計 §4.1 の entitlements 例に実 Team ID を書く"
+    );
+    assert!(
+        !design.contains("$TEAM_ID.jp.riku.winzip") && !design.contains("<string>$TEAM_ID</string>"),
+        "設計に $TEAM_ID プレースホルダを残さない"
+    );
+    assert!(
+        design.contains("CHSRTG92SZ") && design.contains("docs/release/submit-guide.md"),
+        "設計 §9.2 で Team ID を決め、提出ガイドを指す"
+    );
+
+    let guide = read(&root.join("docs/release/submit-guide.md"));
+    for needle in [
+        "CHSRTG92SZ",
+        "jp.riku.winzip",
+        "文字化けしないZIP",
+        "Apple Distribution",
+        "Mac Installer Distribution",
+        "¥900",
+        "日本",
+        "DSA",
+        "Transporter",
+        "ITSAppUsesNonExemptEncryption",
+        "apps/winzip-jp/scripts/appstore-pkg.sh",
+        "docs/store/listing.md",
+    ] {
+        assert!(guide.contains(needle), "提出ガイドに「{needle}」が無い");
+    }
+    assert!(
+        !guide.contains("BEGIN PRIVATE KEY")
+            && !guide.contains("-----BEGIN")
+            && !guide.contains("AuthKey_"),
+        "提出ガイドに秘密鍵や API キーを書かない"
     );
 }

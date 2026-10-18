@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ad-hoc 署名のサンドボックス debug ビルドで、フィクスチャ読取と無関係パス拒否を証明する。
-# $TEAM_ID プレースホルダは署名前に必ず外す（残すとカーネルが SIGKILL する）。
+# 提出用 Entitlements の Team ID（CHSRTG92SZ）と $TEAM_ID プレースホルダは
+# 署名前に必ず外す。プロビジョニング無しの team-identifier はカーネルが SIGKILL する。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -12,10 +13,15 @@ ARTIFACTS="${SANDBOX_ARTIFACTS:-$APP_DIR/e2e/artifacts}"
 mkdir -p "$ARTIFACTS"
 
 cd "$APP_DIR"
+# 提出用 signingIdentity（Apple Distribution）は CI / ad-hoc では使わない。
+ADHOC_CFG="$(mktemp)"
+printf '%s\n' '{"bundle":{"macOS":{"signingIdentity":"-"}}}' > "$ADHOC_CFG"
 pnpm exec tauri build --debug \
   --config src-tauri/tauri.appstore.conf.json \
+  --config "$ADHOC_CFG" \
   --features e2e \
   --bundles app
+rm -f "$ADHOC_CFG"
 
 APP="$ROOT/target/debug/bundle/macos/${APP_NAME}.app"
 if [[ ! -d "$APP" ]]; then
@@ -38,7 +44,7 @@ echo "deny-secret" > "$DENY"
 
 ENTITLEMENTS="$TAURI/Entitlements.plist"
 TMP_ENT="$(mktemp)"
-# ad-hoc では $TEAM_ID プレースホルダを外す。権限セットは §4.1 のまま。
+# ad-hoc では team-identifier を外す。権限セット（sandbox / user-selected / bookmarks / network.client）は §4.1 のまま。
 python3 - "$ENTITLEMENTS" "$TMP_ENT" <<'PY'
 import plistlib
 import sys
@@ -52,7 +58,7 @@ for key in (
 ):
     data.pop(key, None)
 for key, value in list(data.items()):
-    if isinstance(value, str) and "$TEAM_ID" in value:
+    if isinstance(value, str) and ("$TEAM_ID" in value or "CHSRTG92SZ" in value):
         data.pop(key)
 plistlib.dump(data, dst.open("wb"))
 PY
@@ -64,6 +70,10 @@ codesign --verify --verbose=2 "$APP"
 codesign -d --entitlements :- "$APP" > "$ARTIFACTS/signed-entitlements.xml"
 if grep -qF '$TEAM_ID' "$ARTIFACTS/signed-entitlements.xml"; then
   echo "ad-hoc 署名に \$TEAM_ID が残っています" >&2
+  exit 1
+fi
+if grep -qF 'CHSRTG92SZ' "$ARTIFACTS/signed-entitlements.xml"; then
+  echo "ad-hoc 署名に Team ID が残っています" >&2
   exit 1
 fi
 if ! grep -q 'com.apple.security.app-sandbox' "$ARTIFACTS/signed-entitlements.xml"; then
