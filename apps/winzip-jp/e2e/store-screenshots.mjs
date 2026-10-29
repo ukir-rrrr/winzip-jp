@@ -16,9 +16,9 @@ const HEIGHT = 1800;
 
 const SHOTS = [
   {
-    file: "01-windows.png",
+    file: "01-anypc.png",
     scene: "store-create",
-    headline: "Windowsでも文字化けしない",
+    headline: "どのパソコンでも文字化けしない",
     note: "",
     assert: async (page) => {
       const text = await page.locator("[data-testid='file-list']").innerText();

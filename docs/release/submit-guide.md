@@ -278,7 +278,7 @@ App Store Connect の macOS バージョン（日本語）を開き、`docs/stor
 | Connect の欄 | listing.md の印 | 値の要約 |
 | --- | --- | --- |
 | 名前 | `listing:name` | 文字化けしないZIP |
-| サブタイトル | `listing:subtitles` | Windowsでも日本語が化けないZIP作成・解凍（採用 1 本だけ） |
+| サブタイトル | `listing:subtitles` | 日本語ファイル名が化けないZIP作成・解凍（採用 1 本だけ） |
 | プロモーション用テキスト | `listing:promo` | 囲みの全文 |
 | 説明 | `listing:description` | 囲みの全文 |
 | キーワード | `listing:keywords` | カンマ区切り・空白なし |
